@@ -1,3 +1,5 @@
+> ⚠️ **Community-Maintained SDK** — This SDK is in Alpha quality and maintained by the community. For production use on Apple platforms, consider using the [Streamline WASM SDK](https://github.com/streamlinelabs/streamline-wasm-sdk) for browser/WebAssembly use cases. Contributions welcome!
+
 # Streamline Swift SDK
 
 Swift client SDK for [Streamline](https://github.com/streamlinelabs/streamline) — *The Redis of Streaming*.
