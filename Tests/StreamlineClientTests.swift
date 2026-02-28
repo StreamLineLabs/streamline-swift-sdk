@@ -32,3 +32,4 @@ final class StreamlineClientTests: XCTestCase {
         XCTAssertEqual(a, b)
     }
 }
+
