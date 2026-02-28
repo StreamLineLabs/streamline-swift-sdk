@@ -18,7 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sendable-safe types for structured concurrency
 - iOS 15+ and macOS 13+ support
 - XCTest suite with integration tests
+- Batch message support
+- TLS connection support
+- Integration tests for message roundtrip
 - Zero external dependencies
+
+### Fixed
+- Handle timeout on reconnect
+- Resolve actor isolation warnings
+
+### Changed
+- Extract configuration to dedicated type
 
 ### Infrastructure
 - Swift Package Manager (SPM) configuration
