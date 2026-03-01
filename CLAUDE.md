@@ -35,3 +35,4 @@ Tests/
 - Thread-safety via `NSLock` for shared mutable state.
 - No third-party dependencies — uses only Foundation.
 - Follows Swift API Design Guidelines for naming.
+
