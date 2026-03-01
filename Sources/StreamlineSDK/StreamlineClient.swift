@@ -285,3 +285,4 @@ public final class StreamlineClient: @unchecked Sendable {
         return StreamlineMessage(topic: topic, key: key, value: value, offset: offset, timestamp: timestamp)
     }
 }
+
