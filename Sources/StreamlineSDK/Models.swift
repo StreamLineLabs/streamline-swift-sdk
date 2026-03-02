@@ -90,3 +90,4 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// The offline queue is full and cannot accept more messages.
     case offlineQueueFull
 }
+
