@@ -65,6 +65,89 @@ public struct ConsumerGroup: Sendable, Equatable {
     }
 }
 
+// MARK: - Topic Description
+
+/// Detailed topic description including configuration.
+public struct TopicDescription: Sendable, Equatable {
+    public let name: String
+    public let partitions: Int
+    public let replicationFactor: Int
+    public let messageCount: Int64
+    public let config: [String: String]
+
+    public init(name: String, partitions: Int, replicationFactor: Int, messageCount: Int64 = 0, config: [String: String] = [:]) {
+        self.name = name
+        self.partitions = partitions
+        self.replicationFactor = replicationFactor
+        self.messageCount = messageCount
+        self.config = config
+    }
+}
+
+// MARK: - Consumer Group Description
+
+/// A member of a consumer group.
+public struct ConsumerGroupMember: Sendable, Equatable {
+    public let id: String
+    public let clientId: String
+    public let host: String
+    public let assignments: [String]
+
+    public init(id: String, clientId: String = "", host: String = "", assignments: [String] = []) {
+        self.id = id
+        self.clientId = clientId
+        self.host = host
+        self.assignments = assignments
+    }
+}
+
+/// Detailed description of a consumer group.
+public struct ConsumerGroupDescription: Sendable, Equatable {
+    public let id: String
+    public let state: String
+    public let members: [ConsumerGroupMember]
+    public let protocolType: String
+
+    public init(id: String, state: String, members: [ConsumerGroupMember] = [], protocolType: String = "") {
+        self.id = id
+        self.state = state
+        self.members = members
+        self.protocolType = protocolType
+    }
+}
+
+// MARK: - Query Result
+
+/// Result from a SQL query against streaming data.
+public struct QueryResult: Sendable, Equatable {
+    public let columns: [String]
+    public let rows: [[String]]
+    public let rowCount: Int
+
+    public init(columns: [String] = [], rows: [[String]] = [], rowCount: Int = 0) {
+        self.columns = columns
+        self.rows = rows
+        self.rowCount = rowCount
+    }
+}
+
+// MARK: - Server Info
+
+/// Information about the Streamline server.
+public struct ServerInfo: Sendable, Equatable {
+    public let version: String
+    public let uptime: Int64
+    public let topicCount: Int
+    public let messageCount: Int64
+
+    public init(version: String = "", uptime: Int64 = 0, topicCount: Int = 0, messageCount: Int64 = 0) {
+        self.version = version
+        self.uptime = uptime
+        self.topicCount = topicCount
+        self.messageCount = messageCount
+    }
+}
+
 // MARK: - Errors
 
 /// Errors that can occur when interacting with the Streamline SDK.
@@ -89,5 +172,11 @@ public enum StreamlineError: Error, Sendable, Equatable {
 
     /// The offline queue is full and cannot accept more messages.
     case offlineQueueFull
+
+    /// An admin operation failed.
+    case adminOperationFailed(String)
+
+    /// A SQL query failed.
+    case queryFailed(String)
 }
 

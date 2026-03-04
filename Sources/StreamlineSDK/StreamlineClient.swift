@@ -173,6 +173,29 @@ public final class StreamlineClient: @unchecked Sendable {
         ws.send(.string(command)) { _ in }
     }
 
+    // MARK: - AsyncStream Consumption
+
+    /// Returns an `AsyncStream` of messages for the given topic.
+    ///
+    /// The stream subscribes when iteration begins and unsubscribes when
+    /// the task is cancelled. Use with Swift's `for await` syntax:
+    ///
+    /// ```swift
+    /// for await message in client.messages(topic: "events") {
+    ///     print("Got: \(String(data: message.value, encoding: .utf8)!)")
+    /// }
+    /// ```
+    public func messages(topic: String) -> AsyncStream<StreamlineMessage> {
+        AsyncStream { continuation in
+            self.subscribe(topic: topic) { message in
+                continuation.yield(message)
+            }
+            continuation.onTermination = { @Sendable _ in
+                self.unsubscribe(topic: topic)
+            }
+        }
+    }
+
     // MARK: - Internals
 
     private func listenForMessages() {
