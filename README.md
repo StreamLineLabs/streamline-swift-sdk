@@ -2,12 +2,18 @@
 
 # Streamline Swift SDK
 
+[![CI](https://github.com/streamlinelabs/streamline-swift-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/streamlinelabs/streamline-swift-sdk/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Swift](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org/)
+[![Docs](https://img.shields.io/badge/docs-streamlinelabs.dev-blue.svg)](https://streamlinelabs.dev/docs/sdks/swift)
+
 Swift client SDK for [Streamline](https://github.com/streamlinelabs/streamline) — *The Redis of Streaming*.
 
 ## Requirements
 
 - Swift 5.9+
 - iOS 15+ / macOS 13+
+- Streamline server 0.2.0 or later
 
 ## Installation
 
@@ -46,9 +52,49 @@ client.subscribe(topic: "events") { message in
 client.disconnect()
 ```
 
+## Admin Client
+
+The `AdminClient` communicates with the Streamline HTTP REST API (port 9094) for topic management, consumer group inspection, and SQL queries.
+
+```swift
+let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, authToken: "my-token")
+
+// Topic management
+try await admin.createTopic(name: "events", partitions: 3)
+let topics = try await admin.listTopics()
+let details = try await admin.describeTopic(name: "events")
+try await admin.deleteTopic(name: "old-topic")
+
+// Consumer groups
+let groups = try await admin.listConsumerGroups()
+let groupDetails = try await admin.describeConsumerGroup(groupId: "my-group")
+
+// SQL queries
+let result = try await admin.query("SELECT * FROM events LIMIT 10")
+for row in result.rows { print(row) }
+
+// Server info
+let info = try await admin.serverInfo()
+print("Version: \(info.version), Topics: \(info.topicCount)")
+```
+
+## AsyncStream Consumption
+
+Consume messages using Swift's structured concurrency with `for await`:
+
+```swift
+// Stream messages as an AsyncStream
+for await message in client.messages(topic: "events") {
+    let value = String(data: message.value, encoding: .utf8) ?? ""
+    print("Key: \(message.key ?? "nil"), Value: \(value)")
+}
+```
+
 ## Features
 
 - **WebSocket connection** to Streamline server
+- **Admin client** — topic CRUD, consumer groups, SQL queries via HTTP REST API
+- **AsyncStream consumption** — idiomatic `for await` streaming with automatic lifecycle
 - **Auto-reconnect** with exponential backoff
 - **Offline message queue** — messages produced while disconnected are buffered and sent on reconnect
 - **Delegate pattern** for connection lifecycle events
@@ -66,7 +112,27 @@ client.disconnect()
 | `initialBackoff` | `0.5` | Initial reconnection backoff (seconds) |
 | `maxBackoff` | `30` | Maximum backoff cap (seconds) |
 
+## Error Handling
+
+```swift
+do {
+    try await client.produce(topic: "my-topic", key: "key", value: Data("value".utf8))
+} catch let error as StreamlineError {
+    switch error {
+    case .topicNotFound(let name):
+        print("Topic not found: \(name)")
+    case .connectionFailed(let reason):
+        print("Connection failed: \(reason)")
+    default:
+        print("Error: \(error.localizedDescription)")
+    }
+}
+```
+
+## Contributing
+
+Contributions are welcome! This is a community-maintained SDK. Please see the [organization contributing guide](https://github.com/streamlinelabs/.github/blob/main/CONTRIBUTING.md) for guidelines.
+
 ## License
 
 Apache-2.0
-
