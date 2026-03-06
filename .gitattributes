@@ -1,0 +1,7 @@
+* text=auto
+*.swift text diff=swift
+*.md text diff=markdown
+*.sh text eol=lf
+*.yaml text
+*.yml text
+Package.resolved linguist-generated=true
