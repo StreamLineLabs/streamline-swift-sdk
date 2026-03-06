@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: resolve memory leak in message buffer (2026-03-05)
 
 - feat: add async/await consumer API (2026-03-06)
+
+- test: add XCTest for producer acknowledgements (2026-03-06)
 ## [Unreleased]
 
 ## [0.2.0] - 2026-02-28
