@@ -148,6 +148,32 @@ public struct ServerInfo: Sendable, Equatable {
     }
 }
 
+// MARK: - Schema Info
+
+/// Schema metadata from the Schema Registry.
+public struct SchemaInfo: Sendable, Equatable {
+    public let subject: String
+    public let id: Int
+    public let version: Int
+    public let schemaType: String
+    public let schema: String
+
+    public init(subject: String, id: Int, version: Int, schemaType: String, schema: String) {
+        self.subject = subject
+        self.id = id
+        self.version = version
+        self.schemaType = schemaType
+        self.schema = schema
+    }
+}
+
+/// Schema format types supported by the Schema Registry.
+public enum SchemaFormat: String, Sendable, Equatable {
+    case avro = "AVRO"
+    case protobuf = "PROTOBUF"
+    case json = "JSON"
+}
+
 // MARK: - Errors
 
 /// Errors that can occur when interacting with the Streamline SDK.
@@ -178,5 +204,8 @@ public enum StreamlineError: Error, Sendable, Equatable {
 
     /// A SQL query failed.
     case queryFailed(String)
+
+    /// A schema registry operation failed.
+    case schemaRegistryError(String)
 }
 
