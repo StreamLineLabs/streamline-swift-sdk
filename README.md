@@ -90,11 +90,73 @@ for await message in client.messages(topic: "events") {
 }
 ```
 
+## Schema Registry
+
+The SDK includes a full Schema Registry client:
+
+```swift
+let registry = SchemaRegistryClient(baseURL: URL(string: "http://localhost:9094")!)
+
+// Register a schema
+let id = try await registry.registerSchema(
+    subject: "events-value", schema: avroJson, format: .avro
+)
+
+// Retrieve the latest schema
+let schema = try await registry.getLatestSchema(subject: "events-value")
+print("Version: \(schema.version), Type: \(schema.schemaType)")
+
+// Check compatibility
+let compatible = try await registry.checkCompatibility(
+    subject: "events-value", schema: newSchema, format: .avro
+)
+
+// List subjects and versions
+let subjects = try await registry.listSubjects()
+let versions = try await registry.listVersions(subject: "events-value")
+```
+
+Supports **AVRO**, **PROTOBUF**, and **JSON** schema formats.
+
+## Security
+
+### TLS
+
+```swift
+let config = StreamlineConfiguration(
+    url: URL(string: "wss://streamline.example.com:9092")!,
+    tls: TlsConfig(enabled: true, caCertificatePath: "/etc/ssl/ca.pem")
+)
+```
+
+### SASL Authentication
+
+```swift
+let config = StreamlineConfiguration(
+    url: URL(string: "ws://streamline.example.com:9092")!,
+    sasl: SaslConfig(mechanism: .scramSha256, username: "admin", password: "secret")
+)
+```
+
+## Producer & Consumer Configuration
+
+```swift
+let config = StreamlineConfiguration(
+    url: URL(string: "ws://localhost:9092")!,
+    producerConfig: ProducerConfig(batchSize: 32768, compression: .lz4, acks: .all),
+    consumerConfig: ConsumerConfig(groupId: "my-app", autoCommit: false, autoOffsetReset: .earliest)
+)
+```
+
 ## Features
 
 - **WebSocket connection** to Streamline server
 - **Admin client** — topic CRUD, consumer groups, SQL queries via HTTP REST API
+- **Schema Registry** — register, retrieve, and validate schemas (Avro, Protobuf, JSON)
+- **Security** — TLS encryption and SASL authentication (PLAIN, SCRAM-SHA-256/512)
+- **Producer/Consumer config** — batching, compression, acknowledgments, consumer groups
 - **AsyncStream consumption** — idiomatic `for await` streaming with automatic lifecycle
+- **Telemetry** — pluggable tracing with W3C Trace Context propagation
 - **Auto-reconnect** with exponential backoff
 - **Offline message queue** — messages produced while disconnected are buffered and sent on reconnect
 - **Delegate pattern** for connection lifecycle events
@@ -109,6 +171,10 @@ for await message in client.messages(topic: "events") {
 | `maxRetries` | `10` | Maximum reconnection attempts |
 | `timeout` | `30` | Connection timeout in seconds |
 | `authToken` | `nil` | Optional bearer token for authentication |
+| `tls` | `nil` | TLS configuration (see [Security](#security)) |
+| `sasl` | `nil` | SASL authentication (see [Security](#security)) |
+| `producerConfig` | defaults | Producer tuning (see [Producer & Consumer Configuration](#producer--consumer-configuration)) |
+| `consumerConfig` | defaults | Consumer tuning (see [Producer & Consumer Configuration](#producer--consumer-configuration)) |
 | `initialBackoff` | `0.5` | Initial reconnection backoff (seconds) |
 | `maxBackoff` | `30` | Maximum backoff cap (seconds) |
 
