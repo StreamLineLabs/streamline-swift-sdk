@@ -384,3 +384,30 @@ public final class StreamlineClient: @unchecked Sendable {
     }
 }
 
+
+
+/// Internal buffer for accumulating records before batch send.
+internal struct BatchBuffer<T> {
+    private var items: [T] = []
+    private let capacity: Int
+
+    init(capacity: Int = 1000) {
+        self.capacity = capacity
+        self.items.reserveCapacity(capacity)
+    }
+
+    var isFull: Bool { items.count >= capacity }
+    var count: Int { items.count }
+
+    mutating func append(_ item: T) -> Bool {
+        items.append(item)
+        return isFull
+    }
+
+    mutating func drain() -> [T] {
+        let batch = items
+        items = []
+        items.reserveCapacity(capacity)
+        return batch
+    }
+}
