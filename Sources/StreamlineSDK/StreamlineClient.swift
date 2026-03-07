@@ -43,6 +43,7 @@ public final class StreamlineClient: @unchecked Sendable {
 
     public let configuration: StreamlineConfiguration
     public weak var delegate: StreamlineClientDelegate?
+    public var producerConfig: ProducerConfig
 
     public private(set) var state: ConnectionState = .disconnected {
         didSet {
@@ -61,6 +62,10 @@ public final class StreamlineClient: @unchecked Sendable {
     private var offlineQueue: [StreamlineMessage] = []
     private let maxOfflineQueueSize = 1000
 
+    /// Producer batch accumulator: topic → pending messages.
+    private var batchQueue: [StreamlineMessage] = []
+    private var batchFlushTimer: DispatchWorkItem?
+
     private var retryCount = 0
     private var reconnectTask: Task<Void, Never>?
 
@@ -68,8 +73,9 @@ public final class StreamlineClient: @unchecked Sendable {
 
     // MARK: - Init
 
-    public init(configuration: StreamlineConfiguration, session: URLSession = .shared) {
+    public init(configuration: StreamlineConfiguration, producerConfig: ProducerConfig = ProducerConfig(), session: URLSession = .shared) {
         self.configuration = configuration
+        self.producerConfig = producerConfig
         self.session = session
     }
 
@@ -122,8 +128,10 @@ public final class StreamlineClient: @unchecked Sendable {
 
     // MARK: - Produce
 
-    /// Send a message to the given topic. If the client is disconnected the
-    /// message is placed in the offline queue for later delivery.
+    /// Send a message to the given topic. Messages are accumulated into batches
+    /// and flushed when the batch reaches `producerConfig.batchSize` bytes or
+    /// after `producerConfig.lingerMs` milliseconds, whichever comes first.
+    /// If the client is disconnected the message is placed in the offline queue.
     public func produce(topic: String, key: String? = nil, value: Data) throws {
         let message = StreamlineMessage(topic: topic, key: key, value: value)
 
@@ -131,22 +139,88 @@ public final class StreamlineClient: @unchecked Sendable {
         let currentState = state
         lock.unlock()
 
-        guard currentState == .connected, let ws = webSocketTask else {
+        guard currentState == .connected, webSocketTask != nil else {
             try enqueueOffline(message)
             return
         }
 
-        let payload = encodeMessage(message)
-        ws.send(.data(payload)) { [weak self] error in
-            if let error {
-                self?.delegate?.client(self!, didEncounterError: .connectionFailed(error.localizedDescription))
-            }
+        lock.lock()
+        batchQueue.append(message)
+        let totalBytes = batchQueue.reduce(0) { $0 + $1.value.count }
+        let shouldFlush = totalBytes >= producerConfig.batchSize
+        lock.unlock()
+
+        if shouldFlush {
+            flushBatch()
+        } else {
+            scheduleLingerFlush()
         }
     }
 
     /// Convenience overload accepting a UTF-8 string value.
     public func produce(topic: String, key: String? = nil, stringValue: String) throws {
         try produce(topic: topic, key: key, value: Data(stringValue.utf8))
+    }
+
+    /// Flush all pending batched messages immediately.
+    public func flushBatch() {
+        lock.lock()
+        batchFlushTimer?.cancel()
+        batchFlushTimer = nil
+        let messages = batchQueue
+        batchQueue.removeAll()
+        lock.unlock()
+
+        guard !messages.isEmpty, let ws = webSocketTask else { return }
+
+        for message in messages {
+            sendWithRetry(message: message, ws: ws)
+        }
+    }
+
+    private func scheduleLingerFlush() {
+        lock.lock()
+        guard batchFlushTimer == nil else {
+            lock.unlock()
+            return
+        }
+        let lingerMs = producerConfig.lingerMs
+        let item = DispatchWorkItem { [weak self] in
+            self?.flushBatch()
+        }
+        batchFlushTimer = item
+        lock.unlock()
+
+        let delayMs = max(lingerMs, 1)
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + .milliseconds(delayMs),
+            execute: item
+        )
+    }
+
+    private func sendWithRetry(message: StreamlineMessage, ws: URLSessionWebSocketTask) {
+        var payload = encodeMessage(message, compression: producerConfig.compression)
+        let maxRetries = producerConfig.retries
+        let backoffMs = producerConfig.retryBackoffMs
+        var attempt = 0
+
+        func trySend() {
+            ws.send(.data(payload)) { [weak self] error in
+                if let error {
+                    attempt += 1
+                    if attempt <= maxRetries {
+                        let delayMs = backoffMs * Int(pow(2.0, Double(attempt - 1)))
+                        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs)) {
+                            trySend()
+                        }
+                    } else {
+                        self?.delegate?.client(self!, didEncounterError: .connectionFailed(error.localizedDescription))
+                    }
+                }
+            }
+        }
+
+        trySend()
     }
 
     // MARK: - Subscribe / Unsubscribe
@@ -285,9 +359,10 @@ public final class StreamlineClient: @unchecked Sendable {
 
     // MARK: - Serialization (minimal JSON wire format)
 
-    private func encodeMessage(_ message: StreamlineMessage) -> Data {
+    private func encodeMessage(_ message: StreamlineMessage, compression: CompressionType = .none) -> Data {
         var dict: [String: Any] = ["topic": message.topic, "value": message.value.base64EncodedString()]
         if let key = message.key { dict["key"] = key }
+        if compression != .none { dict["compression"] = compression.rawValue }
         // swiftlint:disable:next force_try
         return try! JSONSerialization.data(withJSONObject: dict)
     }
