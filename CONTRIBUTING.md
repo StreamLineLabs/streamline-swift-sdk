@@ -39,6 +39,30 @@ swift test
 - Keep functions focused and short
 - Use structured concurrency patterns (async/await)
 
+## Running Tests
+
+```bash
+# Run all tests
+swift test
+
+# Run with verbose output
+swift test --verbose
+
+# Run with code coverage
+swift test --enable-code-coverage
+
+# Run specific test class
+swift test --filter StreamlineClientTests
+
+# Run conformance tests only
+swift test --filter ConformanceTests
+
+# Integration tests (requires running Streamline server)
+docker compose -f docker-compose.test.yml up -d
+swift test --filter ConformanceTests
+docker compose -f docker-compose.test.yml down
+```
+
 ## Pull Request Guidelines
 
 - Write clear commit messages

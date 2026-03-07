@@ -174,6 +174,26 @@ public enum SchemaFormat: String, Sendable, Equatable {
     case json = "JSON"
 }
 
+// MARK: - Error Code
+
+/// Categorizes SDK errors for programmatic handling.
+public enum StreamlineErrorCode: String, Sendable, Equatable {
+    case connection = "CONNECTION"
+    case authentication = "AUTHENTICATION"
+    case authorization = "AUTHORIZATION"
+    case topicNotFound = "TOPIC_NOT_FOUND"
+    case timeout = "TIMEOUT"
+    case serialization = "SERIALIZATION"
+    case offlineQueueFull = "OFFLINE_QUEUE_FULL"
+    case circuitBreakerOpen = "CIRCUIT_BREAKER_OPEN"
+    case adminOperation = "ADMIN"
+    case query = "QUERY"
+    case schemaRegistry = "SCHEMA_REGISTRY"
+    case producer = "PRODUCER"
+    case consumer = "CONSUMER"
+    case `internal` = "INTERNAL"
+}
+
 // MARK: - Errors
 
 /// Errors that can occur when interacting with the Streamline SDK.
@@ -187,6 +207,9 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// The server rejected the authentication credentials.
     case authenticationFailed(String)
 
+    /// The authenticated principal lacks the required permissions.
+    case authorizationFailed(String)
+
     /// A produce or subscribe call timed out.
     case timeout
 
@@ -199,6 +222,15 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// The offline queue is full and cannot accept more messages.
     case offlineQueueFull
 
+    /// The circuit breaker is open. Associated value is remaining cooldown in milliseconds.
+    case circuitBreakerOpen(Int)
+
+    /// A produce operation failed.
+    case producerError(String)
+
+    /// A consume operation failed.
+    case consumerError(String)
+
     /// An admin operation failed.
     case adminOperationFailed(String)
 
@@ -207,5 +239,70 @@ public enum StreamlineError: Error, Sendable, Equatable {
 
     /// A schema registry operation failed.
     case schemaRegistryError(String)
+
+    /// Machine-readable error category.
+    public var code: StreamlineErrorCode {
+        switch self {
+        case .notConnected, .connectionFailed: return .connection
+        case .authenticationFailed: return .authentication
+        case .authorizationFailed: return .authorization
+        case .timeout: return .timeout
+        case .topicNotFound: return .topicNotFound
+        case .serializationError: return .serialization
+        case .offlineQueueFull: return .offlineQueueFull
+        case .circuitBreakerOpen: return .circuitBreakerOpen
+        case .producerError: return .producer
+        case .consumerError: return .consumer
+        case .adminOperationFailed: return .adminOperation
+        case .queryFailed: return .query
+        case .schemaRegistryError: return .schemaRegistry
+        }
+    }
+
+    /// Whether the operation may succeed if retried.
+    public var isRetryable: Bool {
+        switch self {
+        case .notConnected, .connectionFailed, .timeout, .circuitBreakerOpen,
+             .producerError, .consumerError, .schemaRegistryError, .adminOperationFailed:
+            return true
+        case .authenticationFailed, .authorizationFailed, .topicNotFound,
+             .serializationError, .offlineQueueFull, .queryFailed:
+            return false
+        }
+    }
+
+    /// A human-friendly suggestion for resolving the error.
+    public var hint: String {
+        switch self {
+        case .notConnected:
+            return "Call connect() before performing operations."
+        case .connectionFailed:
+            return "Check that the Streamline server is running and the URL is correct."
+        case .authenticationFailed:
+            return "Verify your auth token or SASL credentials."
+        case .authorizationFailed:
+            return "Check that the authenticated principal has the required ACL permissions."
+        case .timeout:
+            return "Increase the timeout or check server health."
+        case .topicNotFound:
+            return "Create the topic first or check for typos in the topic name."
+        case .serializationError:
+            return "Verify message format matches the expected schema."
+        case .offlineQueueFull:
+            return "Reconnect to the server or increase the offline queue capacity."
+        case .circuitBreakerOpen:
+            return "The remote endpoint is unhealthy. Retry after the reset timeout."
+        case .producerError:
+            return "Check message size limits and server connectivity."
+        case .consumerError:
+            return "Check consumer group configuration and server connectivity."
+        case .adminOperationFailed:
+            return "Check server connectivity and required permissions."
+        case .queryFailed:
+            return "Verify SQL syntax and that the analytics feature is enabled on the server."
+        case .schemaRegistryError:
+            return "Check schema registry connectivity and schema compatibility."
+        }
+    }
 }
 

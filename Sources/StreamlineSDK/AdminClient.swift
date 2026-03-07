@@ -18,13 +18,15 @@ public final class AdminClient: @unchecked Sendable {
 
     private let baseURL: URL
     private let authToken: String?
+    private let saslConfig: SaslConfig?
     private let session: URLSession
 
     // MARK: - Init
 
-    public init(baseURL: URL, authToken: String? = nil, session: URLSession = .shared) {
+    public init(baseURL: URL, authToken: String? = nil, saslConfig: SaslConfig? = nil, session: URLSession = .shared) {
         self.baseURL = baseURL
         self.authToken = authToken
+        self.saslConfig = saslConfig
         self.session = session
     }
 
@@ -188,8 +190,13 @@ public final class AdminClient: @unchecked Sendable {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method.rawValue
 
+        // Apply auth: bearer token takes precedence, then SASL credentials
         if let token = authToken {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if let sasl = saslConfig {
+            let credentials = Data("\(sasl.username):\(sasl.password)".utf8).base64EncodedString()
+            urlRequest.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+            urlRequest.setValue(sasl.mechanism.rawValue, forHTTPHeaderField: "X-Streamline-SASL-Mechanism")
         }
 
         if let body {

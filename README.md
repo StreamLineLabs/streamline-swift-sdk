@@ -3,6 +3,7 @@
 # Streamline Swift SDK
 
 [![CI](https://github.com/streamlinelabs/streamline-swift-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/streamlinelabs/streamline-swift-sdk/actions/workflows/ci.yml)
+[![codecov](https://img.shields.io/codecov/c/github/streamlinelabs/streamline-swift-sdk?style=flat-square)](https://codecov.io/gh/streamlinelabs/streamline-swift-sdk)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org/)
 [![Docs](https://img.shields.io/badge/docs-streamlinelabs.dev-blue.svg)](https://streamlinelabs.dev/docs/sdks/swift)
@@ -156,6 +157,9 @@ let config = StreamlineConfiguration(
 - **Security** — TLS encryption and SASL authentication (PLAIN, SCRAM-SHA-256/512)
 - **Producer/Consumer config** — batching, compression, acknowledgments, consumer groups
 - **AsyncStream consumption** — idiomatic `for await` streaming with automatic lifecycle
+- **Circuit breaker** — CLOSED → OPEN → HALF_OPEN state machine protects against cascading failures
+- **Retry policy** — exponential backoff with jitter for transient errors; integrates with `isRetryable` error classification
+- **Structured error handling** — `StreamlineErrorCode` enum, `isRetryable` flag, and `hint` on every error case
 - **Telemetry** — pluggable tracing with W3C Trace Context propagation
 - **Auto-reconnect** with exponential backoff
 - **Offline message queue** — messages produced while disconnected are buffered and sent on reconnect
@@ -180,55 +184,58 @@ let config = StreamlineConfiguration(
 
 ## Error Handling
 
-All SDK errors are represented by the `StreamlineError` enum. Each case provides context about the failure:
+All SDK errors are represented by the `StreamlineError` enum. Each case has a machine-readable `code` (`StreamlineErrorCode`), an `isRetryable` flag, and a human-friendly `hint`:
 
-| Error | Description | Retryable? |
-|-------|-------------|------------|
-| `.notConnected` | Client is not connected to the server | Yes — reconnects automatically |
-| `.connectionFailed(String)` | Connection attempt failed with reason | Yes — retry with backoff |
-| `.authenticationFailed(String)` | Server rejected credentials | No |
-| `.timeout` | Operation timed out | Yes |
-| `.topicNotFound(String)` | Requested topic does not exist | No — create the topic first |
-| `.serializationError(String)` | Message encoding/decoding failed | No |
-| `.offlineQueueFull` | Offline buffer capacity exceeded | No — reduce send rate |
-| `.adminOperationFailed(String)` | Admin API call failed | Depends on cause |
-| `.queryFailed(String)` | SQL query execution failed | Depends on cause |
-| `.schemaRegistryError(String)` | Schema registry operation failed | Depends on cause |
+| Error | Code | Retryable? | Hint |
+|-------|------|------------|------|
+| `.notConnected` | `.connection` | Yes | Call connect() first |
+| `.connectionFailed(String)` | `.connection` | Yes | Check server URL |
+| `.authenticationFailed(String)` | `.authentication` | No | Verify credentials |
+| `.authorizationFailed(String)` | `.authorization` | No | Check ACL permissions |
+| `.timeout` | `.timeout` | Yes | Increase timeout |
+| `.topicNotFound(String)` | `.topicNotFound` | No | Create topic first |
+| `.serializationError(String)` | `.serialization` | No | Verify message format |
+| `.offlineQueueFull` | `.offlineQueueFull` | No | Reduce send rate |
+| `.circuitBreakerOpen(Int)` | `.circuitBreakerOpen` | Yes | Retry after reset timeout |
+| `.producerError(String)` | `.producer` | Yes | Check message size |
+| `.consumerError(String)` | `.consumer` | Yes | Check group config |
+| `.adminOperationFailed(String)` | `.adminOperation` | Yes | Check connectivity |
+| `.queryFailed(String)` | `.query` | No | Verify SQL syntax |
+| `.schemaRegistryError(String)` | `.schemaRegistry` | Yes | Check registry connectivity |
 
 ```swift
 do {
     try client.produce(topic: "my-topic", key: "key", value: Data("value".utf8))
 } catch let error as StreamlineError {
-    switch error {
-    case .notConnected:
-        print("Not connected — messages are queued offline")
-    case .connectionFailed(let reason):
-        print("Connection failed: \(reason)")
-    case .topicNotFound(let name):
-        print("Topic not found: \(name)")
-    case .timeout:
-        print("Operation timed out — consider increasing timeout")
-    case .offlineQueueFull:
-        print("Offline queue full — reduce send rate or increase queue size")
-    default:
-        print("Error: \(error.localizedDescription)")
+    if error.isRetryable {
+        print("Transient error (\(error.code)): \(error) — \(error.hint)")
+    } else {
+        print("Fatal error: \(error) — \(error.hint)")
     }
 }
 ```
 
-### Retry Strategy
+### Circuit Breaker
 
-The Swift SDK automatically retries failed sends with exponential backoff when `ProducerConfig.retries > 0` (default: 3). Configure retry behavior:
+The SDK wraps produce and subscribe operations in a `CircuitBreaker`. After consecutive failures exceed the threshold, the breaker opens and rejects calls immediately:
 
 ```swift
-let config = ProducerConfig(
-    retries: 5,              // Max retry attempts
-    retryBackoffMs: 200      // Base backoff (doubles each attempt)
+let config = StreamlineConfiguration(
+    url: wsURL,
+    circuitBreakerConfig: CircuitBreakerConfig(failureThreshold: 5, resetTimeout: 30),
+    retryPolicyConfig: RetryPolicyConfig(maxRetries: 3, baseDelay: 0.2, jitter: true)
 )
-let client = StreamlineClient(
-    configuration: StreamlineConfiguration(url: wsURL),
-    producerConfig: config
-)
+let client = StreamlineClient(configuration: config)
+print("Circuit state: \(client.circuitBreaker.state)") // .closed
+```
+
+### Retry Policy
+
+The `RetryPolicy` retries transient failures (where `isRetryable == true`) with exponential backoff and jitter:
+
+```swift
+let policy = RetryPolicy(config: .init(maxRetries: 5, baseDelay: 0.1))
+let result = try await policy.execute { try await riskyOperation() }
 ```
 
 ## Contributing

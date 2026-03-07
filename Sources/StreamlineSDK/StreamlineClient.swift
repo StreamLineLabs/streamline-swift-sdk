@@ -45,6 +45,12 @@ public final class StreamlineClient: @unchecked Sendable {
     public weak var delegate: StreamlineClientDelegate?
     public var producerConfig: ProducerConfig
 
+    /// Circuit breaker protecting send operations.
+    public let circuitBreaker: CircuitBreaker
+
+    /// Retry policy for transient failures.
+    public let retryPolicy: RetryPolicy
+
     public private(set) var state: ConnectionState = .disconnected {
         didSet {
             guard state != oldValue else { return }
@@ -77,6 +83,8 @@ public final class StreamlineClient: @unchecked Sendable {
         self.configuration = configuration
         self.producerConfig = producerConfig
         self.session = session
+        self.circuitBreaker = CircuitBreaker(config: configuration.circuitBreakerConfig)
+        self.retryPolicy = RetryPolicy(config: configuration.retryPolicyConfig)
     }
 
     deinit {
@@ -98,8 +106,14 @@ public final class StreamlineClient: @unchecked Sendable {
         lock.unlock()
 
         var request = URLRequest(url: configuration.url, timeoutInterval: configuration.timeout)
+
+        // Apply authentication: bearer token or SASL credentials
         if let token = configuration.authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if let sasl = configuration.sasl {
+            let credentials = Data("\(sasl.username):\(sasl.password)".utf8).base64EncodedString()
+            request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+            request.setValue(sasl.mechanism.rawValue, forHTTPHeaderField: "X-Streamline-SASL-Mechanism")
         }
 
         let task = session.webSocketTask(with: request)
@@ -124,6 +138,26 @@ public final class StreamlineClient: @unchecked Sendable {
         webSocketTask = nil
         state = .disconnected
         lock.unlock()
+    }
+
+    // MARK: - Admin
+
+    /// Creates an ``AdminClient`` that inherits auth configuration from this client.
+    ///
+    /// The admin client uses HTTP (default port 9094) while the streaming client
+    /// uses WebSocket (default port 9092). Pass the HTTP base URL.
+    ///
+    /// ```swift
+    /// let client = StreamlineClient(configuration: config)
+    /// let admin = client.admin(baseURL: URL(string: "http://localhost:9094")!)
+    /// let topics = try await admin.listTopics()
+    /// ```
+    public func admin(baseURL: URL) -> AdminClient {
+        AdminClient(
+            baseURL: baseURL,
+            authToken: configuration.authToken,
+            saslConfig: configuration.sasl
+        )
     }
 
     // MARK: - Produce
@@ -173,8 +207,33 @@ public final class StreamlineClient: @unchecked Sendable {
 
         guard !messages.isEmpty, let ws = webSocketTask else { return }
 
-        for message in messages {
-            sendWithRetry(message: message, ws: ws)
+        if messages.count == 1 {
+            sendWithRetry(message: messages[0], ws: ws)
+        } else {
+            // Send as a batch array for efficiency
+            let batchPayloads = messages.map { encodeMessage($0, compression: producerConfig.compression) }
+            let batchArray = batchPayloads.compactMap { String(data: $0, encoding: .utf8) }
+            let wrapper = #"{"action":"produce_batch","messages":[\#(batchArray.joined(separator: ","))]}"#
+
+            do {
+                try retryPolicy.execute {
+                    try self.circuitBreaker.execute {
+                        let semaphore = DispatchSemaphore(value: 0)
+                        var sendError: Error?
+                        ws.send(.string(wrapper)) { error in
+                            sendError = error
+                            semaphore.signal()
+                        }
+                        semaphore.wait()
+                        if let error = sendError {
+                            throw StreamlineError.connectionFailed(error.localizedDescription)
+                        }
+                    }
+                }
+            } catch {
+                delegate?.client(self, didEncounterError:
+                    (error as? StreamlineError) ?? .connectionFailed(error.localizedDescription))
+            }
         }
     }
 
@@ -199,28 +258,27 @@ public final class StreamlineClient: @unchecked Sendable {
     }
 
     private func sendWithRetry(message: StreamlineMessage, ws: URLSessionWebSocketTask) {
-        var payload = encodeMessage(message, compression: producerConfig.compression)
-        let maxRetries = producerConfig.retries
-        let backoffMs = producerConfig.retryBackoffMs
-        var attempt = 0
+        let payload = encodeMessage(message, compression: producerConfig.compression)
 
-        func trySend() {
-            ws.send(.data(payload)) { [weak self] error in
-                if let error {
-                    attempt += 1
-                    if attempt <= maxRetries {
-                        let delayMs = backoffMs * Int(pow(2.0, Double(attempt - 1)))
-                        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs)) {
-                            trySend()
-                        }
-                    } else {
-                        self?.delegate?.client(self!, didEncounterError: .connectionFailed(error.localizedDescription))
+        do {
+            try retryPolicy.execute {
+                try self.circuitBreaker.execute {
+                    let semaphore = DispatchSemaphore(value: 0)
+                    var sendError: Error?
+                    ws.send(.data(payload)) { error in
+                        sendError = error
+                        semaphore.signal()
+                    }
+                    semaphore.wait()
+                    if let error = sendError {
+                        throw StreamlineError.connectionFailed(error.localizedDescription)
                     }
                 }
             }
+        } catch {
+            delegate?.client(self, didEncounterError:
+                (error as? StreamlineError) ?? .connectionFailed(error.localizedDescription))
         }
-
-        trySend()
     }
 
     // MARK: - Subscribe / Unsubscribe
@@ -233,7 +291,14 @@ public final class StreamlineClient: @unchecked Sendable {
 
         guard let ws = webSocketTask else { return }
         let command = #"{"action":"subscribe","topic":"\#(topic)"}"#
-        ws.send(.string(command)) { _ in }
+        do {
+            try circuitBreaker.execute {
+                ws.send(.string(command)) { _ in }
+            }
+        } catch {
+            delegate?.client(self, didEncounterError:
+                (error as? StreamlineError) ?? .connectionFailed(error.localizedDescription))
+        }
     }
 
     /// Remove the subscription for the given topic.
@@ -244,7 +309,14 @@ public final class StreamlineClient: @unchecked Sendable {
 
         guard let ws = webSocketTask else { return }
         let command = #"{"action":"unsubscribe","topic":"\#(topic)"}"#
-        ws.send(.string(command)) { _ in }
+        do {
+            try circuitBreaker.execute {
+                ws.send(.string(command)) { _ in }
+            }
+        } catch {
+            delegate?.client(self, didEncounterError:
+                (error as? StreamlineError) ?? .connectionFailed(error.localizedDescription))
+        }
     }
 
     // MARK: - AsyncStream Consumption

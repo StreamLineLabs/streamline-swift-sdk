@@ -38,6 +38,12 @@ public struct StreamlineConfiguration: Sendable {
     /// Maximum backoff interval cap.
     public let maxBackoff: TimeInterval
 
+    /// Configuration for the circuit breaker protecting send operations.
+    public let circuitBreakerConfig: CircuitBreakerConfig
+
+    /// Configuration for the retry policy on transient failures.
+    public let retryPolicyConfig: RetryPolicyConfig
+
     public init(
         url: URL,
         autoReconnect: Bool = true,
@@ -49,7 +55,9 @@ public struct StreamlineConfiguration: Sendable {
         producerConfig: ProducerConfig = ProducerConfig(),
         consumerConfig: ConsumerConfig = ConsumerConfig(),
         initialBackoff: TimeInterval = 0.5,
-        maxBackoff: TimeInterval = 30
+        maxBackoff: TimeInterval = 30,
+        circuitBreakerConfig: CircuitBreakerConfig = CircuitBreakerConfig(),
+        retryPolicyConfig: RetryPolicyConfig = RetryPolicyConfig()
     ) {
         self.url = url
         self.autoReconnect = autoReconnect
@@ -62,6 +70,8 @@ public struct StreamlineConfiguration: Sendable {
         self.consumerConfig = consumerConfig
         self.initialBackoff = initialBackoff
         self.maxBackoff = maxBackoff
+        self.circuitBreakerConfig = circuitBreakerConfig
+        self.retryPolicyConfig = retryPolicyConfig
     }
 }
 

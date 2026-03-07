@@ -1,9 +1,49 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift Package Manager
 /.build
 /Packages
+Package.resolved
+.swiftpm/
+
+# Xcode
 xcuserdata/
 DerivedData/
-.swiftpm/
 *.xcodeproj
 *.xcworkspace
-Package.resolved
+*.pbxuser
+!default.pbxuser
+*.perspectivev3
+!default.perspectivev3
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Editor temp files
+*.swp
+*.swo
+*~
+\#*\#
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Coverage
+.build/debug/codecov/
+*.profraw
+*.profdata
+
+# OS
+Thumbs.db
+ehthumbs.db

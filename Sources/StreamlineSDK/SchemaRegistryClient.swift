@@ -19,6 +19,50 @@ public final class SchemaRegistryClient: @unchecked Sendable {
     private var authToken: String?
     private let session: URLSession
 
+    // MARK: - Cache (TTL-based)
+
+    private struct CacheEntry {
+        let value: SchemaInfo
+        let expiresAt: Date
+    }
+
+    private let lock = NSLock()
+    private var schemaByIdCache: [Int: CacheEntry] = [:]
+    private var latestSchemaCache: [String: CacheEntry] = [:]
+    private let cacheTtl: TimeInterval = 60 // 1 minute
+
+    private func getCached(byId id: Int) -> SchemaInfo? {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = schemaByIdCache[id], Date() < entry.expiresAt else {
+            schemaByIdCache.removeValue(forKey: id)
+            return nil
+        }
+        return entry.value
+    }
+
+    private func getCached(bySubject subject: String) -> SchemaInfo? {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = latestSchemaCache[subject], Date() < entry.expiresAt else {
+            latestSchemaCache.removeValue(forKey: subject)
+            return nil
+        }
+        return entry.value
+    }
+
+    private func cache(_ info: SchemaInfo, subject: String? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        let entry = CacheEntry(value: info, expiresAt: Date().addingTimeInterval(cacheTtl))
+        schemaByIdCache[info.id] = entry
+        if let subject { latestSchemaCache[subject] = entry }
+    }
+
+    /// Clear all cached schemas.
+    public func clearCache() {
+        lock.lock(); defer { lock.unlock() }
+        schemaByIdCache.removeAll()
+        latestSchemaCache.removeAll()
+    }
+
     // MARK: - Init
 
     public init(baseURL: URL, authToken: String? = nil, session: URLSession = .shared) {
@@ -48,25 +92,40 @@ public final class SchemaRegistryClient: @unchecked Sendable {
               let id = dict["id"] as? Int else {
             throw StreamlineError.schemaRegistryError("Invalid register response")
         }
+        // Invalidate latest cache for this subject on new registration
+        clearCacheForSubject(subject)
         return id
+    }
+
+    private func clearCacheForSubject(_ subject: String) {
+        lock.lock(); defer { lock.unlock() }
+        latestSchemaCache.removeValue(forKey: subject)
     }
 
     /// Get the latest schema for a subject.
     public func getLatestSchema(subject: String) async throws -> SchemaInfo {
+        if let cached = getCached(bySubject: subject) { return cached }
         let data = try await request(.get, path: "/subjects/\(encode(subject))/versions/latest")
-        return try parseSchemaInfo(data)
+        let info = try parseSchemaInfo(data)
+        cache(info, subject: subject)
+        return info
     }
 
     /// Get a specific version of a schema.
     public func getSchemaVersion(subject: String, version: Int) async throws -> SchemaInfo {
         let data = try await request(.get, path: "/subjects/\(encode(subject))/versions/\(version)")
-        return try parseSchemaInfo(data)
+        let info = try parseSchemaInfo(data)
+        cache(info)
+        return info
     }
 
     /// Get a schema by its global ID.
     public func getSchemaById(_ id: Int) async throws -> SchemaInfo {
+        if let cached = getCached(byId: id) { return cached }
         let data = try await request(.get, path: "/schemas/ids/\(id)")
-        return try parseSchemaInfo(data)
+        let info = try parseSchemaInfo(data)
+        cache(info)
+        return info
     }
 
     /// List all registered subjects.
