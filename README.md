@@ -180,19 +180,55 @@ let config = StreamlineConfiguration(
 
 ## Error Handling
 
+All SDK errors are represented by the `StreamlineError` enum. Each case provides context about the failure:
+
+| Error | Description | Retryable? |
+|-------|-------------|------------|
+| `.notConnected` | Client is not connected to the server | Yes — reconnects automatically |
+| `.connectionFailed(String)` | Connection attempt failed with reason | Yes — retry with backoff |
+| `.authenticationFailed(String)` | Server rejected credentials | No |
+| `.timeout` | Operation timed out | Yes |
+| `.topicNotFound(String)` | Requested topic does not exist | No — create the topic first |
+| `.serializationError(String)` | Message encoding/decoding failed | No |
+| `.offlineQueueFull` | Offline buffer capacity exceeded | No — reduce send rate |
+| `.adminOperationFailed(String)` | Admin API call failed | Depends on cause |
+| `.queryFailed(String)` | SQL query execution failed | Depends on cause |
+| `.schemaRegistryError(String)` | Schema registry operation failed | Depends on cause |
+
 ```swift
 do {
-    try await client.produce(topic: "my-topic", key: "key", value: Data("value".utf8))
+    try client.produce(topic: "my-topic", key: "key", value: Data("value".utf8))
 } catch let error as StreamlineError {
     switch error {
-    case .topicNotFound(let name):
-        print("Topic not found: \(name)")
+    case .notConnected:
+        print("Not connected — messages are queued offline")
     case .connectionFailed(let reason):
         print("Connection failed: \(reason)")
+    case .topicNotFound(let name):
+        print("Topic not found: \(name)")
+    case .timeout:
+        print("Operation timed out — consider increasing timeout")
+    case .offlineQueueFull:
+        print("Offline queue full — reduce send rate or increase queue size")
     default:
         print("Error: \(error.localizedDescription)")
     }
 }
+```
+
+### Retry Strategy
+
+The Swift SDK automatically retries failed sends with exponential backoff when `ProducerConfig.retries > 0` (default: 3). Configure retry behavior:
+
+```swift
+let config = ProducerConfig(
+    retries: 5,              // Max retry attempts
+    retryBackoffMs: 200      // Base backoff (doubles each attempt)
+)
+let client = StreamlineClient(
+    configuration: StreamlineConfiguration(url: wsURL),
+    producerConfig: config
+)
 ```
 
 ## Contributing

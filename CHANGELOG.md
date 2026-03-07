@@ -6,14 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+- Producer message batching with configurable `batchSize` and `lingerMs` flush timer
+- Producer retry logic with exponential backoff (configurable `retries` and `retryBackoffMs`)
+- Compression type metadata included in WebSocket produce messages
+- `ProducerConfig` parameter on `StreamlineClient.init()` for batching/retry configuration
+- Expanded error handling documentation in README with all 10 `StreamlineError` cases
+- CODEOWNERS file for review assignment
+
+### Fixed
 - fix: resolve memory leak in message buffer (2026-03-05)
 
+### Changed
 - feat: add async/await consumer API (2026-03-06)
-
 - test: add XCTest for producer acknowledgements (2026-03-06)
-
 - refactor: adopt Swift concurrency structured tasks (2026-03-06)
-## [Unreleased]
 
 ## [0.2.0] - 2026-02-28
 
