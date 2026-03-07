@@ -281,3 +281,17 @@ final class StreamlineClientTests: XCTestCase {
     }
 }
 
+
+
+    func testConnectionValidation() throws {
+        // Verify that invalid configurations are rejected
+        XCTAssertThrowsError(try StreamlineClient(bootstrapServers: "")) { error in
+            XCTAssertTrue(error is StreamlineError)
+        }
+    }
+
+    func testDefaultConfiguration() throws {
+        let config = Configuration(bootstrapServers: "localhost:9092")
+        XCTAssertEqual(config.requestTimeoutMs, 30000)
+        XCTAssertEqual(config.clientId, "streamline-swift-client")
+    }
