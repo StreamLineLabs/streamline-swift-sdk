@@ -209,3 +209,20 @@ public enum StreamlineError: Error, Sendable, Equatable {
     case schemaRegistryError(String)
 }
 
+
+
+/// Utilities for validating records before serialization.
+enum RecordValidation {
+    /// Maximum allowed record size in bytes.
+    static let maxRecordSize = 1_048_576  // 1 MB
+
+    /// Validates that a record does not exceed the maximum size.
+    static func validate(key: Data?, value: Data?) throws {
+        let totalSize = (key?.count ?? 0) + (value?.count ?? 0)
+        if totalSize > maxRecordSize {
+            throw StreamlineError.serialization(
+                "Record size \(totalSize) exceeds maximum \(maxRecordSize) bytes"
+            )
+        }
+    }
+}
