@@ -78,3 +78,13 @@ enum ConfigValidator {
         }
     }
 }
+
+
+/// Compression algorithm for produced messages.
+public enum CompressionType: String {
+    case none = "none"
+    case gzip = "gzip"
+    case snappy = "snappy"
+    case lz4 = "lz4"
+    case zstd = "zstd"
+}
