@@ -65,3 +65,16 @@ public struct StreamlineConfiguration: Sendable {
     }
 }
 
+
+
+/// Validates configuration before client initialization.
+enum ConfigValidator {
+    static func validate(_ config: Configuration) throws {
+        guard !config.bootstrapServers.isEmpty else {
+            throw StreamlineError.configuration("bootstrapServers must not be empty")
+        }
+        guard config.requestTimeoutMs > 0 else {
+            throw StreamlineError.configuration("requestTimeoutMs must be positive")
+        }
+    }
+}
