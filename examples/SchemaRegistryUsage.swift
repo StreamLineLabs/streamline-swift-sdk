@@ -42,7 +42,7 @@ struct SchemaRegistryUsage {
 
         // -- Retrieve the latest schema --
         let latest = try await registry.getLatestSchema(subject: "user-events-value")
-        print("Latest: subject=\(latest.subject), version=\(latest.version), type=\(latest.schemaType)")
+        print("Latest: subject=\(latest.subject), version=\(latest.version), type=\(latest.format.rawValue)")
 
         // -- List all subjects --
         let subjects = try await registry.listSubjects()
@@ -93,8 +93,8 @@ struct SchemaRegistryUsage {
         print("✓ Registered JSON schema with ID: \(jsonId)")
 
         // Cleanup
-        _ = try await registry.deleteSubject("user-events-value")
-        _ = try await registry.deleteSubject("orders-value")
+        try await registry.deleteSubject(subject: "user-events-value")
+        try await registry.deleteSubject(subject: "orders-value")
         print("✓ Done")
     }
 }

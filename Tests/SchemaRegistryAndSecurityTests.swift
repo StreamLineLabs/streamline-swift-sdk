@@ -7,27 +7,27 @@ final class SchemaRegistryTests: XCTestCase {
 
     func testSchemaInfoCreation() {
         let info = SchemaInfo(
-            subject: "orders-value",
             id: 1,
+            subject: "orders-value",
             version: 1,
-            schemaType: "JSON",
+            format: .json,
             schema: #"{"type":"object"}"#
         )
         XCTAssertEqual(info.subject, "orders-value")
         XCTAssertEqual(info.id, 1)
         XCTAssertEqual(info.version, 1)
-        XCTAssertEqual(info.schemaType, "JSON")
+        XCTAssertEqual(info.format, .json)
     }
 
     func testSchemaInfoEquality() {
-        let a = SchemaInfo(subject: "s", id: 1, version: 1, schemaType: "JSON", schema: "{}")
-        let b = SchemaInfo(subject: "s", id: 1, version: 1, schemaType: "JSON", schema: "{}")
+        let a = SchemaInfo(id: 1, subject: "s", version: 1, format: .json, schema: "{}")
+        let b = SchemaInfo(id: 1, subject: "s", version: 1, format: .json, schema: "{}")
         XCTAssertEqual(a, b)
     }
 
     func testSchemaInfoInequality() {
-        let a = SchemaInfo(subject: "s1", id: 1, version: 1, schemaType: "JSON", schema: "{}")
-        let b = SchemaInfo(subject: "s2", id: 2, version: 1, schemaType: "JSON", schema: "{}")
+        let a = SchemaInfo(id: 1, subject: "s1", version: 1, format: .json, schema: "{}")
+        let b = SchemaInfo(id: 2, subject: "s2", version: 1, format: .json, schema: "{}")
         XCTAssertNotEqual(a, b)
     }
 
