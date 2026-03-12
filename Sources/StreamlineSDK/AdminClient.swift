@@ -172,6 +172,166 @@ public final class AdminClient: @unchecked Sendable {
         }
     }
 
+    // MARK: - Cluster Operations
+
+    /// Get cluster overview including broker list and controller info.
+    public func clusterInfo() async throws -> ClusterInfo {
+        let data = try await request(.get, path: "/v1/cluster")
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw StreamlineError.serializationError("Expected cluster info object")
+        }
+        let brokersArray = dict["brokers"] as? [[String: Any]] ?? []
+        let brokers = brokersArray.map { b in
+            BrokerInfo(
+                id: b["id"] as? Int ?? 0,
+                host: b["host"] as? String ?? "",
+                port: b["port"] as? Int ?? 9092,
+                rack: b["rack"] as? String
+            )
+        }
+        return ClusterInfo(
+            clusterId: dict["cluster_id"] as? String ?? "",
+            brokerId: dict["broker_id"] as? Int ?? 0,
+            brokers: brokers,
+            controller: dict["controller"] as? Int ?? -1
+        )
+    }
+
+    /// List all brokers in the cluster.
+    public func listBrokers() async throws -> [BrokerInfo] {
+        return try await clusterInfo().brokers
+    }
+
+    // MARK: - Consumer Group Lag
+
+    /// Get consumer lag for a specific consumer group.
+    public func consumerGroupLag(groupId: String) async throws -> ConsumerGroupLag {
+        let data = try await request(.get, path: "/v1/consumer-groups/\(groupId)/lag")
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw StreamlineError.serializationError("Expected consumer lag object")
+        }
+        let partitionsArray = dict["partitions"] as? [[String: Any]] ?? []
+        let partitions = partitionsArray.map { p in
+            ConsumerLag(
+                topic: p["topic"] as? String ?? "",
+                partition: p["partition"] as? Int ?? 0,
+                currentOffset: p["current_offset"] as? Int64 ?? 0,
+                endOffset: p["end_offset"] as? Int64 ?? 0,
+                lag: p["lag"] as? Int64 ?? 0
+            )
+        }
+        return ConsumerGroupLag(
+            groupId: dict["group_id"] as? String ?? groupId,
+            partitions: partitions,
+            totalLag: dict["total_lag"] as? Int64 ?? partitions.reduce(0) { $0 + $1.lag }
+        )
+    }
+
+    /// Get consumer lag for a specific topic within a consumer group.
+    public func consumerGroupTopicLag(groupId: String, topic: String) async throws -> ConsumerGroupLag {
+        let data = try await request(.get, path: "/v1/consumer-groups/\(groupId)/lag/\(topic)")
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw StreamlineError.serializationError("Expected consumer lag object")
+        }
+        let partitionsArray = dict["partitions"] as? [[String: Any]] ?? []
+        let partitions = partitionsArray.map { p in
+            ConsumerLag(
+                topic: p["topic"] as? String ?? topic,
+                partition: p["partition"] as? Int ?? 0,
+                currentOffset: p["current_offset"] as? Int64 ?? 0,
+                endOffset: p["end_offset"] as? Int64 ?? 0,
+                lag: p["lag"] as? Int64 ?? 0
+            )
+        }
+        return ConsumerGroupLag(
+            groupId: dict["group_id"] as? String ?? groupId,
+            partitions: partitions,
+            totalLag: dict["total_lag"] as? Int64 ?? partitions.reduce(0) { $0 + $1.lag }
+        )
+    }
+
+    /// Reset consumer group offsets (dry run — returns what would change).
+    public func resetOffsetsDryRun(groupId: String, topic: String, strategy: String = "earliest") async throws -> [ConsumerLag] {
+        let body = try JSONSerialization.data(withJSONObject: ["topic": topic, "strategy": strategy])
+        let data = try await request(.post, path: "/v1/consumer-groups/\(groupId)/reset-offsets/dry-run", body: body)
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw StreamlineError.serializationError("Expected array of consumer lag entries")
+        }
+        return array.map { p in
+            ConsumerLag(
+                topic: p["topic"] as? String ?? topic,
+                partition: p["partition"] as? Int ?? 0,
+                currentOffset: p["current_offset"] as? Int64 ?? 0,
+                endOffset: p["end_offset"] as? Int64 ?? 0,
+                lag: p["lag"] as? Int64 ?? 0
+            )
+        }
+    }
+
+    /// Reset consumer group offsets (executes the reset).
+    public func resetOffsets(groupId: String, topic: String, strategy: String = "earliest") async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["topic": topic, "strategy": strategy])
+        _ = try await request(.post, path: "/v1/consumer-groups/\(groupId)/reset-offsets", body: body)
+    }
+
+    // MARK: - Message Inspection
+
+    /// Browse messages from a topic partition.
+    public func inspectMessages(topic: String, partition: Int = 0, offset: Int64? = nil, limit: Int = 20) async throws -> [InspectedMessage] {
+        var params = "?partition=\(partition)&limit=\(limit)"
+        if let offset { params += "&offset=\(offset)" }
+        let data = try await request(.get, path: "/v1/inspect/\(topic)\(params)")
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw StreamlineError.serializationError("Expected array of messages")
+        }
+        return array.map { m in
+            InspectedMessage(
+                offset: m["offset"] as? Int64 ?? 0,
+                key: m["key"] as? String,
+                value: m["value"] as? String ?? "",
+                timestamp: m["timestamp"] as? Int64 ?? 0,
+                partition: m["partition"] as? Int ?? partition,
+                headers: m["headers"] as? [String: String] ?? [:]
+            )
+        }
+    }
+
+    /// Get the latest messages from a topic.
+    public func latestMessages(topic: String, count: Int = 10) async throws -> [InspectedMessage] {
+        let data = try await request(.get, path: "/v1/inspect/\(topic)/latest?count=\(count)")
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw StreamlineError.serializationError("Expected array of messages")
+        }
+        return array.map { m in
+            InspectedMessage(
+                offset: m["offset"] as? Int64 ?? 0,
+                key: m["key"] as? String,
+                value: m["value"] as? String ?? "",
+                timestamp: m["timestamp"] as? Int64 ?? 0,
+                partition: m["partition"] as? Int ?? 0,
+                headers: m["headers"] as? [String: String] ?? [:]
+            )
+        }
+    }
+
+    // MARK: - Metrics
+
+    /// Get metrics history from the server.
+    public func metricsHistory() async throws -> [MetricPoint] {
+        let data = try await request(.get, path: "/v1/metrics/history")
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw StreamlineError.serializationError("Expected array of metrics")
+        }
+        return array.map { m in
+            MetricPoint(
+                name: m["name"] as? String ?? "",
+                value: m["value"] as? Double ?? 0,
+                labels: m["labels"] as? [String: String] ?? [:],
+                timestamp: m["timestamp"] as? Int64 ?? 0
+            )
+        }
+    }
+
     // MARK: - Internal HTTP
 
     private enum HTTPMethod: String {

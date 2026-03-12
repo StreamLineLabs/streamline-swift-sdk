@@ -308,28 +308,28 @@ final class SchemaConformanceTests: XCTestCase {
 
     func testS01_RegisterSchema() {
         let schema = SchemaInfo(
-            subject: "events-value", id: 1, version: 1, schemaType: "AVRO",
+            id: 1, subject: "events-value", version: 1, format: .avro,
             schema: "{\"type\":\"record\",\"name\":\"Event\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"}]}"
         )
         XCTAssertEqual(schema.subject, "events-value")
         XCTAssertEqual(schema.id, 1)
-        XCTAssertEqual(schema.schemaType, "AVRO")
+        XCTAssertEqual(schema.format, .avro)
     }
 
     func testS02_GetSchemaById() {
         let schema = SchemaInfo(
-            subject: "test-value", id: 42, version: 3,
-            schemaType: "PROTOBUF", schema: "syntax = \"proto3\";"
+            id: 42, subject: "test-value", version: 3,
+            format: .protobuf, schema: "syntax = \"proto3\";"
         )
         XCTAssertEqual(schema.id, 42)
         XCTAssertEqual(schema.version, 3)
-        XCTAssertEqual(schema.schemaType, "PROTOBUF")
+        XCTAssertEqual(schema.format, .protobuf)
     }
 
     func testS03_ListVersions() {
         let schemas = [
-            SchemaInfo(subject: "events-value", id: 1, version: 1, schemaType: "AVRO", schema: "{}"),
-            SchemaInfo(subject: "events-value", id: 2, version: 2, schemaType: "AVRO", schema: "{}"),
+            SchemaInfo(id: 1, subject: "events-value", version: 1, format: .avro, schema: "{}"),
+            SchemaInfo(id: 2, subject: "events-value", version: 2, format: .avro, schema: "{}"),
         ]
         XCTAssertEqual(schemas.count, 2)
         XCTAssertEqual(schemas[0].version, 1)
@@ -337,8 +337,8 @@ final class SchemaConformanceTests: XCTestCase {
     }
 
     func testS04_CompatibilityCheck() {
-        let v1 = SchemaInfo(subject: "s", id: 1, version: 1, schemaType: "AVRO", schema: "{\"type\":\"string\"}")
-        let v2 = SchemaInfo(subject: "s", id: 2, version: 2, schemaType: "AVRO", schema: "{\"type\":\"string\"}")
+        let v1 = SchemaInfo(id: 1, subject: "s", version: 1, format: .avro, schema: "{\"type\":\"string\"}")
+        let v2 = SchemaInfo(id: 2, subject: "s", version: 2, format: .avro, schema: "{\"type\":\"string\"}")
         XCTAssertEqual(v1.subject, v2.subject)
         XCTAssertNotEqual(v1.version, v2.version)
     }

@@ -1,4 +1,4 @@
-> ⚠️ **Community-Maintained SDK** — This SDK is in Alpha quality and maintained by the community. For production use on Apple platforms, consider using the [Streamline WASM SDK](https://github.com/streamlinelabs/streamline-wasm-sdk) for browser/WebAssembly use cases. Contributions welcome!
+> 🟢 **Beta SDK** — This SDK is feature-complete with tests and CI for iOS/macOS. For browser/WebAssembly use cases, also see the [WASM SDK](https://github.com/streamlinelabs/streamline-wasm-sdk). Contributions welcome!
 
 # Streamline Swift SDK
 
@@ -76,6 +76,36 @@ for row in result.rows { print(row) }
 // Server info
 let info = try await admin.serverInfo()
 print("Version: \(info.version), Topics: \(info.topicCount)")
+```
+
+### Cluster & Monitoring
+
+```swift
+let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!)
+
+// Cluster overview
+let cluster = try await admin.clusterInfo()
+print("Cluster: \(cluster.clusterId), Brokers: \(cluster.brokers.count)")
+
+// Consumer group lag monitoring
+let lag = try await admin.consumerGroupLag(groupId: "my-group")
+print("Total lag: \(lag.totalLag)")
+for p in lag.partitions { print("  \(p.topic):\(p.partition) lag=\(p.lag)") }
+
+// Message inspection
+let messages = try await admin.inspectMessages(topic: "events", partition: 0, limit: 10)
+for m in messages { print("offset=\(m.offset) value=\(m.value)") }
+
+// Latest messages
+let latest = try await admin.latestMessages(topic: "events", count: 5)
+
+// Server metrics
+let metrics = try await admin.metricsHistory()
+for m in metrics { print("\(m.name)=\(m.value)") }
+
+// Offset management
+let dryRun = try await admin.resetOffsetsDryRun(groupId: "my-group", topic: "events")
+try await admin.resetOffsets(groupId: "my-group", topic: "events")
 ```
 
 ## AsyncStream Consumption
@@ -230,6 +260,32 @@ let client = StreamlineClient(
     producerConfig: config
 )
 ```
+
+## Circuit Breaker
+
+Protect your application from cascading failures when the Streamline server is unresponsive:
+
+```swift
+import StreamlineSDK
+
+let breaker = CircuitBreaker(config: CircuitBreakerConfig(
+    failureThreshold: 5,      // Open after 5 consecutive failures
+    successThreshold: 2,      // Close after 2 half-open successes
+    openTimeout: 30.0         // 30s before probing
+))
+
+if breaker.check() {
+    do {
+        try client.produce(topic: "events", key: "user-1", stringValue: "payload")
+        breaker.recordSuccess()
+    } catch {
+        breaker.recordFailure()
+        throw error
+    }
+}
+```
+
+When the circuit is open, `check()` returns `false` and operations should be skipped. See the [Circuit Breaker guide](https://streamlinelabs.dev/docs/features/circuit-breaker) for details.
 
 ## Contributing
 

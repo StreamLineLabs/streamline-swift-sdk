@@ -1,5 +1,8 @@
 import Foundation
 
+/// SDK version constant, kept in sync with the organization release.
+public let streamlineSDKVersion = "0.2.0"
+
 /// Configuration for connecting to a Streamline server.
 ///
 /// All properties are immutable after initialization. Use the initializer
@@ -69,22 +72,12 @@ public struct StreamlineConfiguration: Sendable {
 
 /// Validates configuration before client initialization.
 enum ConfigValidator {
-    static func validate(_ config: Configuration) throws {
-        guard !config.bootstrapServers.isEmpty else {
-            throw StreamlineError.configuration("bootstrapServers must not be empty")
+    static func validate(_ config: StreamlineConfiguration) throws {
+        guard config.url.absoluteString.count > 0 else {
+            throw StreamlineError.configurationError("server URL must not be empty")
         }
-        guard config.requestTimeoutMs > 0 else {
-            throw StreamlineError.configuration("requestTimeoutMs must be positive")
+        guard config.timeout > 0 else {
+            throw StreamlineError.configurationError("timeout must be positive")
         }
     }
-}
-
-
-/// Compression algorithm for produced messages.
-public enum CompressionType: String {
-    case none = "none"
-    case gzip = "gzip"
-    case snappy = "snappy"
-    case lz4 = "lz4"
-    case zstd = "zstd"
 }

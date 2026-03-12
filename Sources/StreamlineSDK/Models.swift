@@ -150,28 +150,159 @@ public struct ServerInfo: Sendable, Equatable {
 
 // MARK: - Schema Info
 
-/// Schema metadata from the Schema Registry.
-public struct SchemaInfo: Sendable, Equatable {
-    public let subject: String
+/// Schema formats supported by the registry.
+public enum SchemaFormat: String, Codable, Sendable, Equatable {
+    case avro = "AVRO"
+    case json = "JSON"
+    case protobuf = "PROTOBUF"
+}
+
+/// Compatibility levels for schema evolution.
+public enum CompatibilityLevel: String, Codable, Sendable, Equatable {
+    case backward = "BACKWARD"
+    case forward = "FORWARD"
+    case full = "FULL"
+    case none = "NONE"
+    case backwardTransitive = "BACKWARD_TRANSITIVE"
+    case forwardTransitive = "FORWARD_TRANSITIVE"
+    case fullTransitive = "FULL_TRANSITIVE"
+}
+
+/// Schema information returned by the registry.
+public struct SchemaInfo: Codable, Sendable, Equatable {
     public let id: Int
+    public let subject: String
     public let version: Int
-    public let schemaType: String
+    public let format: SchemaFormat
     public let schema: String
 
-    public init(subject: String, id: Int, version: Int, schemaType: String, schema: String) {
-        self.subject = subject
+    public init(id: Int, subject: String, version: Int, format: SchemaFormat, schema: String) {
         self.id = id
+        self.subject = subject
         self.version = version
-        self.schemaType = schemaType
+        self.format = format
         self.schema = schema
     }
 }
 
-/// Schema format types supported by the Schema Registry.
-public enum SchemaFormat: String, Sendable, Equatable {
-    case avro = "AVRO"
-    case protobuf = "PROTOBUF"
-    case json = "JSON"
+// MARK: - Cluster Info
+
+/// Information about the Streamline cluster.
+public struct ClusterInfo: Sendable, Equatable {
+    public let clusterId: String
+    public let brokerId: Int
+    public let brokers: [BrokerInfo]
+    public let controller: Int
+
+    public init(clusterId: String = "", brokerId: Int = 0, brokers: [BrokerInfo] = [], controller: Int = -1) {
+        self.clusterId = clusterId
+        self.brokerId = brokerId
+        self.brokers = brokers
+        self.controller = controller
+    }
+}
+
+/// Information about a single broker in the cluster.
+public struct BrokerInfo: Sendable, Equatable {
+    public let id: Int
+    public let host: String
+    public let port: Int
+    public let rack: String?
+
+    public init(id: Int = 0, host: String = "", port: Int = 9092, rack: String? = nil) {
+        self.id = id
+        self.host = host
+        self.port = port
+        self.rack = rack
+    }
+}
+
+// MARK: - Consumer Lag
+
+/// Consumer group lag information for a topic partition.
+public struct ConsumerLag: Sendable, Equatable {
+    public let topic: String
+    public let partition: Int
+    public let currentOffset: Int64
+    public let endOffset: Int64
+    public let lag: Int64
+
+    public init(topic: String, partition: Int = 0, currentOffset: Int64 = 0, endOffset: Int64 = 0, lag: Int64 = 0) {
+        self.topic = topic
+        self.partition = partition
+        self.currentOffset = currentOffset
+        self.endOffset = endOffset
+        self.lag = lag
+    }
+}
+
+/// Aggregated consumer group lag across all subscribed partitions.
+public struct ConsumerGroupLag: Sendable, Equatable {
+    public let groupId: String
+    public let partitions: [ConsumerLag]
+    public let totalLag: Int64
+
+    public init(groupId: String, partitions: [ConsumerLag] = [], totalLag: Int64 = 0) {
+        self.groupId = groupId
+        self.partitions = partitions
+        self.totalLag = totalLag
+    }
+}
+
+// MARK: - Message Inspection
+
+/// A message returned by the message inspection API.
+public struct InspectedMessage: Sendable, Equatable {
+    public let offset: Int64
+    public let key: String?
+    public let value: String
+    public let timestamp: Int64
+    public let partition: Int
+    public let headers: [String: String]
+
+    public init(offset: Int64, key: String? = nil, value: String = "", timestamp: Int64 = 0, partition: Int = 0, headers: [String: String] = [:]) {
+        self.offset = offset
+        self.key = key
+        self.value = value
+        self.timestamp = timestamp
+        self.partition = partition
+        self.headers = headers
+    }
+}
+
+// MARK: - Metrics
+
+/// A single metric data point from the server.
+public struct MetricPoint: Sendable, Equatable {
+    public let name: String
+    public let value: Double
+    public let labels: [String: String]
+    public let timestamp: Int64
+
+    public init(name: String = "", value: Double = 0, labels: [String: String] = [:], timestamp: Int64 = 0) {
+        self.name = name
+        self.value = value
+        self.labels = labels
+        self.timestamp = timestamp
+    }
+}
+
+// MARK: - Error Code
+
+/// Programmatic classification of errors for handling and retry logic.
+public enum ErrorCode: String, Sendable, Equatable, CaseIterable {
+    case connection
+    case timeout
+    case authentication
+    case authorization
+    case topicNotFound
+    case partitionNotFound
+    case `protocol`
+    case serialization
+    case schema
+    case configuration
+    case `internal`
+    case circuitOpen
 }
 
 // MARK: - Errors
@@ -187,14 +318,26 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// The server rejected the authentication credentials.
     case authenticationFailed(String)
 
+    /// The client is not authorized to perform the operation.
+    case authorizationFailed(String)
+
     /// A produce or subscribe call timed out.
     case timeout
 
     /// The requested topic does not exist.
     case topicNotFound(String)
 
+    /// The requested partition does not exist.
+    case partitionNotFound(String)
+
     /// Message serialization or deserialization failed.
     case serializationError(String)
+
+    /// A wire-protocol framing or decoding error.
+    case protocolError(String)
+
+    /// A configuration value is invalid.
+    case configurationError(String)
 
     /// The offline queue is full and cannot accept more messages.
     case offlineQueueFull
@@ -207,9 +350,98 @@ public enum StreamlineError: Error, Sendable, Equatable {
 
     /// A schema registry operation failed.
     case schemaRegistryError(String)
+
+    /// The circuit breaker is open; calls are being rejected.
+    case circuitOpen
+
+    /// An unexpected internal error occurred.
+    case internalError(String)
+
+    /// A transaction operation failed.
+    case transaction(String)
+
+    // MARK: - Computed Properties
+
+    /// Programmatic error classification.
+    public var errorCode: ErrorCode {
+        switch self {
+        case .notConnected, .connectionFailed:
+            return .connection
+        case .timeout:
+            return .timeout
+        case .authenticationFailed:
+            return .authentication
+        case .authorizationFailed:
+            return .authorization
+        case .topicNotFound:
+            return .topicNotFound
+        case .partitionNotFound:
+            return .partitionNotFound
+        case .protocolError:
+            return .protocol
+        case .serializationError:
+            return .serialization
+        case .schemaRegistryError:
+            return .schema
+        case .configurationError:
+            return .configuration
+        case .offlineQueueFull, .adminOperationFailed, .queryFailed, .internalError, .transaction:
+            return .internal
+        case .circuitOpen:
+            return .circuitOpen
+        }
+    }
+
+    /// Whether this error is transient and the operation may succeed if retried.
+    public var isRetryable: Bool {
+        switch errorCode {
+        case .connection, .timeout, .circuitOpen:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Human-readable guidance for resolving this error.
+    public var hint: String {
+        switch self {
+        case .notConnected:
+            return "Call connect() before producing or subscribing."
+        case .connectionFailed(let reason):
+            return "Connection failed (\(reason)). Verify the server URL and network connectivity."
+        case .authenticationFailed:
+            return "Check your authToken, or SASL username/password credentials."
+        case .authorizationFailed:
+            return "The authenticated identity lacks permission for this operation. Check ACLs."
+        case .timeout:
+            return "The operation timed out. Consider increasing the timeout or checking server load."
+        case .topicNotFound(let name):
+            return "Topic '\(name)' does not exist. Create it first or enable auto-create on the server."
+        case .partitionNotFound(let detail):
+            return "Partition not found (\(detail)). Verify the partition index is within the topic's range."
+        case .serializationError:
+            return "Message payload could not be serialized/deserialized. Check the data format."
+        case .protocolError:
+            return "Wire-protocol error. Ensure the client and server versions are compatible."
+        case .configurationError(let detail):
+            return "Invalid configuration (\(detail)). Review StreamlineConfiguration values."
+        case .offlineQueueFull:
+            return "The offline queue is full (1000 messages). Connect to the server or reduce produce rate."
+        case .adminOperationFailed(let reason):
+            return "Admin operation failed (\(reason)). Check server logs for details."
+        case .queryFailed(let reason):
+            return "SQL query failed (\(reason)). Verify your query syntax."
+        case .schemaRegistryError(let reason):
+            return "Schema registry error (\(reason)). Check subject names and schema compatibility."
+        case .circuitOpen:
+            return "Circuit breaker is open due to repeated failures. Wait for the open timeout to elapse."
+        case .internalError(let reason):
+            return "Internal error (\(reason)). This may indicate a bug — please report it."
+        case .transaction(let reason):
+            return "Transaction error (\(reason)). Ensure transactions are properly begun before commit/abort."
+        }
+    }
 }
-
-
 
 /// Utilities for validating records before serialization.
 enum RecordValidation {
@@ -220,7 +452,7 @@ enum RecordValidation {
     static func validate(key: Data?, value: Data?) throws {
         let totalSize = (key?.count ?? 0) + (value?.count ?? 0)
         if totalSize > maxRecordSize {
-            throw StreamlineError.serialization(
+            throw StreamlineError.serializationError(
                 "Record size \(totalSize) exceeds maximum \(maxRecordSize) bytes"
             )
         }

@@ -44,6 +44,7 @@ public final class StreamlineClient: @unchecked Sendable {
     public let configuration: StreamlineConfiguration
     public weak var delegate: StreamlineClientDelegate?
     public var producerConfig: ProducerConfig
+    public var circuitBreaker: CircuitBreaker?
 
     public private(set) var state: ConnectionState = .disconnected {
         didSet {
@@ -71,11 +72,31 @@ public final class StreamlineClient: @unchecked Sendable {
 
     private let lock = NSLock()
 
+    // Client metrics
+    private var _metrics = ClientMetrics()
+
+    /// Read-only snapshot of client-side metrics.
+    public var clientMetrics: ClientMetrics {
+        lock.lock()
+        let m = _metrics
+        lock.unlock()
+        return m
+    }
+
+    // Poll buffer for poll-based consumption
+    private var pollBuffer: [StreamlineMessage] = []
+    private let pollBufferCapacity = 10_000
+
+    // Transaction state
+    private var inTransaction = false
+    private var transactionBuffer: [(topic: String, key: String?, value: Data)] = []
+
     // MARK: - Init
 
-    public init(configuration: StreamlineConfiguration, producerConfig: ProducerConfig = ProducerConfig(), session: URLSession = .shared) {
+    public init(configuration: StreamlineConfiguration, producerConfig: ProducerConfig = ProducerConfig(), circuitBreaker: CircuitBreaker? = nil, session: URLSession = .shared) {
         self.configuration = configuration
         self.producerConfig = producerConfig
+        self.circuitBreaker = circuitBreaker
         self.session = session
     }
 
@@ -133,6 +154,11 @@ public final class StreamlineClient: @unchecked Sendable {
     /// after `producerConfig.lingerMs` milliseconds, whichever comes first.
     /// If the client is disconnected the message is placed in the offline queue.
     public func produce(topic: String, key: String? = nil, value: Data) throws {
+        // Check circuit breaker before accepting the message
+        if let cb = circuitBreaker {
+            try cb.check()
+        }
+
         let message = StreamlineMessage(topic: topic, key: key, value: value)
 
         lock.lock()
@@ -160,6 +186,49 @@ public final class StreamlineClient: @unchecked Sendable {
     /// Convenience overload accepting a UTF-8 string value.
     public func produce(topic: String, key: String? = nil, stringValue: String) throws {
         try produce(topic: topic, key: key, value: Data(stringValue.utf8))
+    }
+
+    // MARK: - Transactions
+
+    /// Begin a new transaction. Messages sent via `sendTransactional` are
+    /// buffered until `commitTransaction` or `abortTransaction`.
+    public func beginTransaction() throws {
+        guard !inTransaction else {
+            throw StreamlineError.transaction("Transaction already in progress")
+        }
+        inTransaction = true
+        transactionBuffer = []
+    }
+
+    /// Buffer a message within the current transaction.
+    public func sendTransactional(topic: String, key: String? = nil, value: Data) throws {
+        guard inTransaction else {
+            throw StreamlineError.transaction("No transaction in progress")
+        }
+        transactionBuffer.append((topic: topic, key: key, value: value))
+    }
+
+    /// Commit the transaction, sending all buffered records.
+    public func commitTransaction() throws {
+        guard inTransaction else {
+            throw StreamlineError.transaction("No transaction in progress")
+        }
+        defer {
+            inTransaction = false
+            transactionBuffer = []
+        }
+        for msg in transactionBuffer {
+            try produce(topic: msg.topic, key: msg.key, value: msg.value)
+        }
+    }
+
+    /// Abort the transaction, discarding all buffered records.
+    public func abortTransaction() throws {
+        guard inTransaction else {
+            throw StreamlineError.transaction("No transaction in progress")
+        }
+        inTransaction = false
+        transactionBuffer = []
     }
 
     /// Flush all pending batched messages immediately.
@@ -199,14 +268,19 @@ public final class StreamlineClient: @unchecked Sendable {
     }
 
     private func sendWithRetry(message: StreamlineMessage, ws: URLSessionWebSocketTask) {
-        var payload = encodeMessage(message, compression: producerConfig.compression)
+        let payload = encodeMessage(message, compression: producerConfig.compression)
         let maxRetries = producerConfig.retries
         let backoffMs = producerConfig.retryBackoffMs
         var attempt = 0
+        let startTime = Date()
 
         func trySend() {
             ws.send(.data(payload)) { [weak self] error in
                 if let error {
+                    self?.circuitBreaker?.recordFailure()
+                    self?.lock.lock()
+                    self?._metrics.produceErrors += 1
+                    self?.lock.unlock()
                     attempt += 1
                     if attempt <= maxRetries {
                         let delayMs = backoffMs * Int(pow(2.0, Double(attempt - 1)))
@@ -216,6 +290,16 @@ public final class StreamlineClient: @unchecked Sendable {
                     } else {
                         self?.delegate?.client(self!, didEncounterError: .connectionFailed(error.localizedDescription))
                     }
+                } else {
+                    self?.circuitBreaker?.recordSuccess()
+                    let latencyMs = Date().timeIntervalSince(startTime) * 1000
+                    self?.lock.lock()
+                    let count = (self?._metrics.produceCount ?? 0)
+                    let prevAvg = self?._metrics.produceAvgLatencyMs ?? 0
+                    self?._metrics.produceCount += 1
+                    self?._metrics.produceBytes += Int64(message.value.count)
+                    self?._metrics.produceAvgLatencyMs = (prevAvg * Double(count) + latencyMs) / Double(count + 1)
+                    self?.lock.unlock()
                 }
             }
         }
@@ -270,7 +354,301 @@ public final class StreamlineClient: @unchecked Sendable {
         }
     }
 
+    // MARK: - Poll-based Consumption
+
+    /// Poll for messages from all subscribed topics.
+    ///
+    /// Returns up to `maxRecords` messages that have been buffered from
+    /// active subscriptions. This provides a Kafka-style pull model
+    /// complementing the callback-based ``subscribe(topic:handler:)``
+    /// and async ``messages(topic:)`` APIs.
+    ///
+    /// - Parameters:
+    ///   - maxRecords: Maximum messages to return (default: 500).
+    ///   - timeout: Maximum time to wait for messages if buffer is empty.
+    /// - Returns: Array of buffered messages.
+    public func poll(maxRecords: Int = 500, timeout: TimeInterval = 1.0) async -> [StreamlineMessage] {
+        // First drain anything already buffered
+        lock.lock()
+        if !pollBuffer.isEmpty {
+            let count = min(maxRecords, pollBuffer.count)
+            let batch = Array(pollBuffer.prefix(count))
+            pollBuffer.removeFirst(count)
+            lock.unlock()
+            return batch
+        }
+        lock.unlock()
+
+        // Wait up to timeout for messages to arrive
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            lock.lock()
+            if !pollBuffer.isEmpty {
+                let count = min(maxRecords, pollBuffer.count)
+                let batch = Array(pollBuffer.prefix(count))
+                pollBuffer.removeFirst(count)
+                lock.unlock()
+                return batch
+            }
+            lock.unlock()
+        }
+        return []
+    }
+
     // MARK: - Internals
+
+    /// Committed offsets tracked locally (topic:partition → offset).
+    private var committedOffsets: [String: Int64] = [:]
+
+    /// Current consumer positions tracked locally (topic:partition → offset).
+    private var currentPositions: [String: Int64] = [:]
+
+    /// Pending offset query continuations awaiting server response.
+    private var pendingOffsetQueries: [String: CheckedContinuation<Int64?, Never>] = [:]
+    private var pendingOffsetQueryOrder: [String] = []
+
+    // MARK: - Offset Management
+
+    /// Commit consumer offsets to the server.
+    ///
+    /// - Parameter offsets: A dictionary of `"topic:partition"` keys to offset values.
+    /// - Throws: ``StreamlineError/notConnected`` if the client is disconnected.
+    public func commitOffsets(_ offsets: [String: Int64]) async throws {
+        lock.lock()
+        let ws = webSocketTask
+        lock.unlock()
+
+        guard let ws else {
+            throw StreamlineError.notConnected
+        }
+
+        let payload: [String: Any] = [
+            "action": "commit_offsets",
+            "offsets": offsets.mapValues { NSNumber(value: $0) },
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try await ws.send(.data(data))
+
+        lock.lock()
+        for (key, offset) in offsets {
+            committedOffsets[key] = offset
+        }
+        lock.unlock()
+    }
+
+    /// Seek to a specific offset for a topic partition.
+    ///
+    /// - Parameters:
+    ///   - topic: The topic name.
+    ///   - partition: The partition index.
+    ///   - offset: The offset to seek to.
+    /// - Throws: ``StreamlineError/notConnected`` if the client is disconnected.
+    public func seekToOffset(topic: String, partition: Int, offset: Int64) async throws {
+        lock.lock()
+        let ws = webSocketTask
+        lock.unlock()
+
+        guard let ws else {
+            throw StreamlineError.notConnected
+        }
+
+        let payload: [String: Any] = [
+            "action": "seek",
+            "topic": topic,
+            "partition": partition,
+            "offset": NSNumber(value: offset),
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try await ws.send(.data(data))
+
+        let key = "\(topic):\(partition)"
+        lock.lock()
+        currentPositions[key] = offset
+        lock.unlock()
+    }
+
+    /// Seek to the beginning of all partitions for the given topic.
+    ///
+    /// - Parameter topic: The topic name.
+    /// - Throws: ``StreamlineError/notConnected`` if the client is disconnected.
+    public func seekToBeginning(topic: String) async throws {
+        lock.lock()
+        let ws = webSocketTask
+        lock.unlock()
+
+        guard let ws else {
+            throw StreamlineError.notConnected
+        }
+
+        let payload: [String: Any] = [
+            "action": "seek_to_beginning",
+            "topic": topic,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try await ws.send(.data(data))
+
+        lock.lock()
+        let keysToReset = currentPositions.keys.filter { $0.hasPrefix("\(topic):") }
+        for key in keysToReset {
+            currentPositions[key] = 0
+        }
+        lock.unlock()
+    }
+
+    /// Seek to the end (latest) of all partitions for the given topic.
+    ///
+    /// - Parameter topic: The topic name.
+    /// - Throws: ``StreamlineError/notConnected`` if the client is disconnected.
+    public func seekToEnd(topic: String) async throws {
+        lock.lock()
+        let ws = webSocketTask
+        lock.unlock()
+
+        guard let ws else {
+            throw StreamlineError.notConnected
+        }
+
+        let payload: [String: Any] = [
+            "action": "seek_to_end",
+            "topic": topic,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try await ws.send(.data(data))
+
+        lock.lock()
+        let keysToReset = currentPositions.keys.filter { $0.hasPrefix("\(topic):") }
+        for key in keysToReset {
+            currentPositions.removeValue(forKey: key)
+        }
+        lock.unlock()
+    }
+
+    /// Get the current consumer position for a specific topic partition.
+    ///
+    /// Sends a query to the server over WebSocket and awaits the response.
+    /// Falls back to locally tracked position if the server does not respond.
+    public func position(topic: String, partition: Int) async -> Int64? {
+        let key = "\(topic):\(partition)"
+
+        lock.lock()
+        let ws = webSocketTask
+        lock.unlock()
+
+        guard let ws else {
+            lock.lock()
+            let local = currentPositions[key]
+            lock.unlock()
+            return local
+        }
+
+        let payload: [String: Any] = [
+            "action": "position",
+            "topic": topic,
+            "partition": partition,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            lock.lock()
+            let local = currentPositions[key]
+            lock.unlock()
+            return local
+        }
+
+        do {
+            try await ws.send(.data(data))
+        } catch {
+            lock.lock()
+            let local = currentPositions[key]
+            lock.unlock()
+            return local
+        }
+
+        return await withCheckedContinuation { continuation in
+            let queryId = UUID().uuidString
+            lock.lock()
+            pendingOffsetQueries[queryId] = continuation
+            pendingOffsetQueryOrder.append(queryId)
+            lock.unlock()
+
+            // Timeout after 5 seconds to avoid hanging forever.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                if let cont = self.pendingOffsetQueries.removeValue(forKey: queryId) {
+                    self.pendingOffsetQueryOrder.removeAll { $0 == queryId }
+                    let local = self.currentPositions[key]
+                    self.lock.unlock()
+                    cont.resume(returning: local)
+                } else {
+                    self.lock.unlock()
+                }
+            }
+        }
+    }
+
+    /// Get the last committed offset for a specific topic partition.
+    ///
+    /// Sends a query to the server over WebSocket and awaits the response.
+    /// Falls back to locally tracked committed offset if the server does not respond.
+    public func committed(topic: String, partition: Int) async -> Int64? {
+        let key = "\(topic):\(partition)"
+
+        lock.lock()
+        let ws = webSocketTask
+        lock.unlock()
+
+        guard let ws else {
+            lock.lock()
+            let local = committedOffsets[key]
+            lock.unlock()
+            return local
+        }
+
+        let payload: [String: Any] = [
+            "action": "committed",
+            "topic": topic,
+            "partition": partition,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            lock.lock()
+            let local = committedOffsets[key]
+            lock.unlock()
+            return local
+        }
+
+        do {
+            try await ws.send(.data(data))
+        } catch {
+            lock.lock()
+            let local = committedOffsets[key]
+            lock.unlock()
+            return local
+        }
+
+        return await withCheckedContinuation { continuation in
+            let queryId = UUID().uuidString
+            lock.lock()
+            pendingOffsetQueries[queryId] = continuation
+            pendingOffsetQueryOrder.append(queryId)
+            lock.unlock()
+
+            // Timeout after 5 seconds to avoid hanging forever.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                if let cont = self.pendingOffsetQueries.removeValue(forKey: queryId) {
+                    self.pendingOffsetQueryOrder.removeAll { $0 == queryId }
+                    let local = self.committedOffsets[key]
+                    self.lock.unlock()
+                    cont.resume(returning: local)
+                } else {
+                    self.lock.unlock()
+                }
+            }
+        }
+    }
+
+    // MARK: - Receive Loop
 
     private func listenForMessages() {
         webSocketTask?.receive { [weak self] result in
@@ -296,9 +674,30 @@ public final class StreamlineClient: @unchecked Sendable {
             return
         }
 
+        // Try to resolve a pending offset query if this is an offset response.
+        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           dict["offset"] != nil || dict["action"] as? String == "offset_response" {
+            let offset = dict["offset"] as? Int64
+            lock.lock()
+            if let firstKey = pendingOffsetQueryOrder.first,
+               let continuation = pendingOffsetQueries.removeValue(forKey: firstKey) {
+                pendingOffsetQueryOrder.removeFirst()
+                lock.unlock()
+                continuation.resume(returning: offset)
+                return
+            }
+            lock.unlock()
+        }
+
         guard let message = decodeMessage(data) else { return }
 
+        // Track consume metrics and buffer for poll
         lock.lock()
+        _metrics.consumeCount += 1
+        _metrics.consumeBytes += Int64(message.value.count)
+        if pollBuffer.count < pollBufferCapacity {
+            pollBuffer.append(message)
+        }
         let handler = subscriptions[message.topic]
         lock.unlock()
 
