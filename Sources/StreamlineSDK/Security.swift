@@ -76,6 +76,10 @@ public final class TelemetrySpan: @unchecked Sendable {
 
     let startTime: Date
 
+    private let lock = NSLock()
+    private var _attributes: [String: String] = [:]
+    private var _error: Error?
+
     init(name: String, topic: String, operation: String) {
         self.name = name
         self.topic = topic
@@ -87,6 +91,36 @@ public final class TelemetrySpan: @unchecked Sendable {
     public var elapsed: TimeInterval {
         Date().timeIntervalSince(startTime)
     }
+
+    /// Attach a key-value attribute to the span.
+    public func setAttribute(_ key: String, value: String) {
+        lock.lock()
+        _attributes[key] = value
+        lock.unlock()
+    }
+
+    /// Record an error on the span.
+    public func setError(_ error: Error) {
+        lock.lock()
+        _error = error
+        lock.unlock()
+    }
+
+    /// Current span attributes.
+    public var attributes: [String: String] {
+        lock.lock()
+        let copy = _attributes
+        lock.unlock()
+        return copy
+    }
+
+    /// Whether an error has been recorded on this span.
+    public var hasError: Bool {
+        lock.lock()
+        let err = _error != nil
+        lock.unlock()
+        return err
+    }
 }
 
 /// Protocol for telemetry implementations.
@@ -94,6 +128,24 @@ public protocol Telemetry: Sendable {
     func startSpan(topic: String, operation: String) -> TelemetrySpan
     func endSpan(_ span: TelemetrySpan)
     func endSpan(_ span: TelemetrySpan, error: String)
+}
+
+public extension Telemetry {
+    /// Start a span with a custom name and attributes dictionary.
+    func startSpan(_ name: String, attributes: [String: String]) -> TelemetrySpan {
+        let topic = attributes[TelemetryAttributes.messagingDestinationName] ?? ""
+        let operation = attributes[TelemetryAttributes.messagingOperation] ?? ""
+        let span = startSpan(topic: topic, operation: operation)
+        for (key, value) in attributes {
+            span.setAttribute(key, value: value)
+        }
+        return span
+    }
+
+    /// Generate a W3C traceparent header value for context propagation.
+    func traceparent() -> String? {
+        TraceContext.generateTraceparent()
+    }
 }
 
 /// No-op telemetry implementation (zero overhead when telemetry is disabled).

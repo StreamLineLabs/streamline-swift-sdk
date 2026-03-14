@@ -287,6 +287,18 @@ if breaker.check() {
 
 When the circuit is open, `check()` returns `false` and operations should be skipped. See the [Circuit Breaker guide](https://streamlinelabs.dev/docs/features/circuit-breaker) for details.
 
+## Examples
+
+The [`examples/`](examples/) directory contains runnable examples:
+
+| Example | Description |
+|---------|-------------|
+| [BasicUsage.swift](examples/BasicUsage.swift) | Produce, consume, and admin operations |
+| [QueryUsage.swift](examples/QueryUsage.swift) | SQL analytics with the embedded query engine |
+| [SchemaRegistryUsage.swift](examples/SchemaRegistryUsage.swift) | Schema registration and validation |
+| [CircuitBreakerUsage.swift](examples/CircuitBreakerUsage.swift) | Resilient production with circuit breaker |
+| [SecurityUsage.swift](examples/SecurityUsage.swift) | TLS and SASL authentication |
+
 ## Contributing
 
 Contributions are welcome! This is a community-maintained SDK. Please see the [organization contributing guide](https://github.com/streamlinelabs/.github/blob/main/CONTRIBUTING.md) for guidelines.
