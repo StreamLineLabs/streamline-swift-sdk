@@ -52,6 +52,26 @@ client.subscribe(topic: "events") { message in
 client.disconnect()
 ```
 
+## Transactions
+
+```swift
+let client = StreamlineClient(configuration: config)
+try await client.connect()
+
+try await client.beginTransaction()
+do {
+    try await client.produce(topic: "orders", key: "k1", value: "v1")
+    try await client.produce(topic: "orders", key: "k2", value: "v2")
+    try await client.commitTransaction()
+} catch {
+    try await client.abortTransaction()
+    throw error
+}
+```
+
+> **Note:** Transactions use client-side buffering. Messages are collected and sent as a batch
+> on commit, providing all-or-nothing delivery at the client level.
+
 ## Admin Client
 
 The `AdminClient` communicates with the Streamline HTTP REST API (port 9094) for topic management, consumer group inspection, and SQL queries.
