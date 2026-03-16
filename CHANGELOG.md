@@ -62,3 +62,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Swift Package Manager (SPM) configuration
 - Apache 2.0 license
 
+- feat: implement exponential backoff for reconnection logic
