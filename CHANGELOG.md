@@ -65,3 +65,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: implement exponential backoff for reconnection logic
 - refactor: separate ConnectionManager from StreamlineClient
 - docs: document Swift Package dependency setup
+- fix: prevent connection timeout on high-latency networks

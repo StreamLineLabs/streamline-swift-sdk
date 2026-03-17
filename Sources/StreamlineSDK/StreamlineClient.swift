@@ -762,8 +762,7 @@ public final class StreamlineClient: @unchecked Sendable {
         var dict: [String: Any] = ["topic": message.topic, "value": message.value.base64EncodedString()]
         if let key = message.key { dict["key"] = key }
         if compression != .none { dict["compression"] = compression.rawValue }
-        // swiftlint:disable:next force_try
-        return try! JSONSerialization.data(withJSONObject: dict)
+        return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
     }
 
     private func decodeMessage(_ data: Data) -> StreamlineMessage? {
