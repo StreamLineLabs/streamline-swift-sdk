@@ -66,3 +66,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - refactor: separate ConnectionManager from StreamlineClient
 - docs: document Swift Package dependency setup
 - fix: prevent connection timeout on high-latency networks
+- chore: update Swift Package manifest for Xcode 16
