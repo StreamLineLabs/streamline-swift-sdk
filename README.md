@@ -319,6 +319,54 @@ The [`examples/`](examples/) directory contains runnable examples:
 | [CircuitBreakerUsage.swift](examples/CircuitBreakerUsage.swift) | Resilient production with circuit breaker |
 | [SecurityUsage.swift](examples/SecurityUsage.swift) | TLS and SASL authentication |
 
+## Moonshot Features
+
+> ⚠️ **Experimental** — These features require Streamline server 0.3.0+ with moonshot feature flags enabled.
+
+### Semantic Search
+
+Query topics by meaning instead of offset. Requires a topic created with `semantic.embed=true`.
+
+```swift
+let results = try await client.search(topic: "logs.app", query: "payment failure", k: 10)
+for hit in results {
+    print("[p\(hit.partition)] offset=\(hit.offset) score=\(String(format: "%.2f", hit.score))")
+}
+```
+
+### Attestation Verification
+
+Verify cryptographic provenance attestations attached to records by data contracts.
+
+```swift
+import StreamlineSDK
+
+let verifier = try StreamlineVerifier(publicKey: publicKeyData)
+let result = try verifier.verify(record: record)
+print("Verified: \(result.verified), Producer: \(result.producerId)")
+```
+
+### Agent Memory (MCP)
+
+Use Streamline as persistent memory for AI agents via the MCP protocol.
+
+```swift
+let memory = MemoryClient(baseURL: URL(string: "http://localhost:9094/mcp/v1")!)
+try await memory.remember("user prefers dark mode", tags: ["preferences"])
+let results = try await memory.recall("user preferences", k: 5)
+```
+
+### Branched Streams
+
+Create topic branches for replay, A/B testing, or counterfactual analysis.
+
+```swift
+let branch = try await admin.createBranch(topic: "events", name: "experiment-v2")
+for await msg in client.messages(topic: branch.topic) {
+    process(msg)
+}
+```
+
 ## Contributing
 
 Contributions are welcome! This is a community-maintained SDK. Please see the [organization contributing guide](https://github.com/streamlinelabs/.github/blob/main/CONTRIBUTING.md) for guidelines.

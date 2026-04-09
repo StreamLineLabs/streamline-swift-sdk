@@ -50,6 +50,27 @@ public struct TopicInfo: Sendable, Equatable {
     }
 }
 
+// MARK: - Search Result
+
+/// A single search result from a topic.
+public struct SearchResult: Sendable, Equatable {
+    /// Partition of the matching record.
+    public let partition: Int
+    /// Offset of the matching record.
+    public let offset: Int64
+    /// Similarity score (higher = more relevant).
+    public let score: Double
+    /// Record value, if returned by the server.
+    public let value: String?
+
+    public init(partition: Int, offset: Int64, score: Double, value: String? = nil) {
+        self.partition = partition
+        self.offset = offset
+        self.score = score
+        self.value = value
+    }
+}
+
 // MARK: - Consumer Group
 
 /// Represents a consumer group on the server.
@@ -303,6 +324,11 @@ public enum ErrorCode: String, Sendable, Equatable, CaseIterable {
     case configuration
     case `internal`
     case circuitOpen
+    case contractViolation
+    case attestationFailed
+    case memoryAccessDenied
+    case branchQuotaExceeded
+    case semanticSearchUnavailable
 }
 
 // MARK: - Errors
@@ -360,6 +386,21 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// A transaction operation failed.
     case transaction(String)
 
+    /// A record violated the topic's data contract.
+    case contractViolation(topic: String, details: String)
+
+    /// Attestation signature verification failed.
+    case attestationFailed(String)
+
+    /// An agent lacks permission to access memory.
+    case memoryAccessDenied(agent: String)
+
+    /// A branch exceeded its storage or lifetime quota.
+    case branchQuotaExceeded(branch: String, details: String)
+
+    /// Semantic search is unavailable (embedding provider down).
+    case semanticSearchUnavailable(String)
+
     // MARK: - Computed Properties
 
     /// Programmatic error classification.
@@ -389,13 +430,23 @@ public enum StreamlineError: Error, Sendable, Equatable {
             return .internal
         case .circuitOpen:
             return .circuitOpen
+        case .contractViolation:
+            return .contractViolation
+        case .attestationFailed:
+            return .attestationFailed
+        case .memoryAccessDenied:
+            return .memoryAccessDenied
+        case .branchQuotaExceeded:
+            return .branchQuotaExceeded
+        case .semanticSearchUnavailable:
+            return .semanticSearchUnavailable
         }
     }
 
     /// Whether this error is transient and the operation may succeed if retried.
     public var isRetryable: Bool {
         switch errorCode {
-        case .connection, .timeout, .circuitOpen:
+        case .connection, .timeout, .circuitOpen, .semanticSearchUnavailable:
             return true
         default:
             return false
@@ -439,6 +490,16 @@ public enum StreamlineError: Error, Sendable, Equatable {
             return "Internal error (\(reason)). This may indicate a bug — please report it."
         case .transaction(let reason):
             return "Transaction error (\(reason)). Ensure transactions are properly begun before commit/abort."
+        case .contractViolation(let topic, _):
+            return "Record violated the data contract for topic '\(topic)'. Validate the record against the registered schema."
+        case .attestationFailed:
+            return "Attestation signature verification failed. Check the signing key and attestation configuration."
+        case .memoryAccessDenied(let agent):
+            return "Agent '\(agent)' lacks permission. Verify agent permissions for memory operations."
+        case .branchQuotaExceeded(let branch, _):
+            return "Branch '\(branch)' exceeded its quota. Increase branch quotas or clean up unused branches."
+        case .semanticSearchUnavailable:
+            return "Semantic search is unavailable. Check embedding provider connectivity and configuration."
         }
     }
 }

@@ -334,6 +334,35 @@ public final class AdminClient: @unchecked Sendable {
 
     // MARK: - Internal HTTP
 
+    // MARK: - Search
+
+    /// Searches a topic using semantic search via the HTTP API.
+    ///
+    /// - Parameters:
+    ///   - topic: Topic to search.
+    ///   - query: Free-text search query.
+    ///   - k: Maximum number of results (default 10).
+    /// - Returns: Array of search results ordered by descending score.
+    public func search(topic: String, query: String, k: Int = 10) async throws -> [SearchResult] {
+        let payload: [String: Any] = ["query": query, "k": k]
+        let bodyData = try JSONSerialization.data(withJSONObject: payload)
+        let data = try await request(.post, path: "/api/v1/topics/\(topic)/search", body: bodyData)
+
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hits = dict["hits"] as? [[String: Any]] else {
+            return []
+        }
+
+        return hits.map { h in
+            SearchResult(
+                partition: h["partition"] as? Int ?? 0,
+                offset: h["offset"] as? Int64 ?? 0,
+                score: h["score"] as? Double ?? 0.0,
+                value: h["value"] as? String
+            )
+        }
+    }
+
     private enum HTTPMethod: String {
         case get = "GET"
         case post = "POST"

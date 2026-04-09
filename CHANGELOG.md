@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `MoonshotClients.swift` — URLSession + async/await clients for the
+  Streamline Moonshot HTTP control plane (port `9094`): `BranchesClient`,
+  `ContractsClient`, `AttestationClient`, `SearchClient`, `MemoryClient`.
+- Shared `MoonshotOptions`, `MoonshotError`, and `Codable` DTOs.
+
+### Added
 - Producer message batching with configurable `batchSize` and `lingerMs` flush timer
 - Producer retry logic with exponential backoff (configurable `retries` and `retryBackoffMs`)
 - Compression type metadata included in WebSocket produce messages
