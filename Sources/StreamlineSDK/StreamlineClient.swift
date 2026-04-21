@@ -154,6 +154,8 @@ public final class StreamlineClient: @unchecked Sendable {
     /// after `producerConfig.lingerMs` milliseconds, whichever comes first.
     /// If the client is disconnected the message is placed in the offline queue.
     public func produce(topic: String, key: String? = nil, value: Data) throws {
+        try TopicNameValidator.validate(topic)
+
         // Check circuit breaker before accepting the message
         if let cb = circuitBreaker {
             try cb.check()
@@ -311,6 +313,7 @@ public final class StreamlineClient: @unchecked Sendable {
 
     /// Register a handler for messages on the given topic.
     public func subscribe(topic: String, handler: @escaping MessageHandler) {
+        guard (try? TopicNameValidator.validate(topic)) != nil else { return }
         lock.lock()
         subscriptions[topic] = handler
         lock.unlock()

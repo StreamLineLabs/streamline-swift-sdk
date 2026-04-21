@@ -64,6 +64,7 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Create a new topic.
     public func createTopic(name: String, partitions: Int = 1, replicationFactor: Int = 1, config: [String: String] = [:]) async throws {
+        try TopicNameValidator.validate(name)
         var body: [String: Any] = [
             "name": name,
             "partitions": partitions,
@@ -78,6 +79,7 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Delete a topic by name.
     public func deleteTopic(name: String) async throws {
+        try TopicNameValidator.validate(name)
         _ = try await request(.delete, path: "/v1/topics/\(name)")
     }
 

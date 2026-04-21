@@ -62,6 +62,7 @@ public final class ConnectionPool: @unchecked Sendable {
 
     /// Produce a message using a round-robin selected connection.
     public func produce(topic: String, key: String? = nil, value: Data) throws {
+        try TopicNameValidator.validate(topic)
         let conn = nextConnection()
         try conn.produce(topic: topic, key: key, value: value)
     }
@@ -76,6 +77,7 @@ public final class ConnectionPool: @unchecked Sendable {
     /// Subscribe to a topic using a deterministic connection assignment.
     /// The same topic always uses the same connection for ordered delivery.
     public func subscribe(topic: String, handler: @escaping MessageHandler) {
+        guard (try? TopicNameValidator.validate(topic)) != nil else { return }
         let index = assignedIndex(for: topic)
         connections[index].subscribe(topic: topic, handler: handler)
     }
