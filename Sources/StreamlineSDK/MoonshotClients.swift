@@ -59,7 +59,10 @@ public class MoonshotHTTPBase: @unchecked Sendable {
         body: Any? = nil,
         acceptableStatuses: Set<Int> = []
     ) async throws -> (Int, Data) {
-        var req = URLRequest(url: opts.httpURL.appendingPathComponent(path))
+        guard let url = URL(string: path, relativeTo: opts.httpURL) else {
+            throw MoonshotError.invalidArgument("invalid request path")
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = method
         if let token = opts.authToken {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -94,9 +97,7 @@ public class MoonshotHTTPBase: @unchecked Sendable {
 
     /// Path-segment style URL encoding (encodes "/" as %2F).
     func encode(_ s: String) -> String {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
+        URLPathSegmentEncoder.encode(s)
     }
 
     func parseObject(_ data: Data) throws -> [String: Any] {

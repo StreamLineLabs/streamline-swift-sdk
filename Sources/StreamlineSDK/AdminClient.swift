@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
 /// HTTP-based admin client for managing Streamline server resources.
 ///
 /// Unlike ``StreamlineClient`` which uses WebSocket for real-time messaging,
@@ -48,7 +52,11 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Get detailed information about a specific topic.
     public func describeTopic(name: String) async throws -> TopicDescription {
-        let data = try await request(.get, path: "/v1/topics/\(name)")
+        try TopicNameValidator.validate(name)
+        let data = try await request(
+            .get,
+            path: "/v1/topics/\(URLPathSegmentEncoder.encode(name))"
+        )
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw StreamlineError.serializationError("Expected topic object")
         }
@@ -80,7 +88,10 @@ public final class AdminClient: @unchecked Sendable {
     /// Delete a topic by name.
     public func deleteTopic(name: String) async throws {
         try TopicNameValidator.validate(name)
-        _ = try await request(.delete, path: "/v1/topics/\(name)")
+        _ = try await request(
+            .delete,
+            path: "/v1/topics/\(URLPathSegmentEncoder.encode(name))"
+        )
     }
 
     // MARK: - Consumer Group Operations
@@ -102,7 +113,13 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Get detailed information about a specific consumer group.
     public func describeConsumerGroup(groupId: String) async throws -> ConsumerGroupDescription {
-        let data = try await request(.get, path: "/v1/consumer-groups/\(groupId)")
+        guard !groupId.isEmpty else {
+            throw StreamlineError.configurationError("consumer group ID must not be empty")
+        }
+        let data = try await request(
+            .get,
+            path: "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+        )
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw StreamlineError.serializationError("Expected consumer group object")
         }
@@ -125,7 +142,13 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Delete a consumer group.
     public func deleteConsumerGroup(groupId: String) async throws {
-        _ = try await request(.delete, path: "/v1/consumer-groups/\(groupId)")
+        guard !groupId.isEmpty else {
+            throw StreamlineError.configurationError("consumer group ID must not be empty")
+        }
+        _ = try await request(
+            .delete,
+            path: "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+        )
     }
 
     // MARK: - Query Operations
@@ -208,7 +231,13 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Get consumer lag for a specific consumer group.
     public func consumerGroupLag(groupId: String) async throws -> ConsumerGroupLag {
-        let data = try await request(.get, path: "/v1/consumer-groups/\(groupId)/lag")
+        guard !groupId.isEmpty else {
+            throw StreamlineError.configurationError("consumer group ID must not be empty")
+        }
+        let data = try await request(
+            .get,
+            path: "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))/lag"
+        )
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw StreamlineError.serializationError("Expected consumer lag object")
         }
@@ -231,7 +260,16 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Get consumer lag for a specific topic within a consumer group.
     public func consumerGroupTopicLag(groupId: String, topic: String) async throws -> ConsumerGroupLag {
-        let data = try await request(.get, path: "/v1/consumer-groups/\(groupId)/lag/\(topic)")
+        guard !groupId.isEmpty else {
+            throw StreamlineError.configurationError("consumer group ID must not be empty")
+        }
+        try TopicNameValidator.validate(topic)
+        let data = try await request(
+            .get,
+            path:
+                "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+                + "/lag/\(URLPathSegmentEncoder.encode(topic))"
+        )
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw StreamlineError.serializationError("Expected consumer lag object")
         }
@@ -254,8 +292,18 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Reset consumer group offsets (dry run — returns what would change).
     public func resetOffsetsDryRun(groupId: String, topic: String, strategy: String = "earliest") async throws -> [ConsumerLag] {
+        guard !groupId.isEmpty else {
+            throw StreamlineError.configurationError("consumer group ID must not be empty")
+        }
+        try TopicNameValidator.validate(topic)
         let body = try JSONSerialization.data(withJSONObject: ["topic": topic, "strategy": strategy])
-        let data = try await request(.post, path: "/v1/consumer-groups/\(groupId)/reset-offsets/dry-run", body: body)
+        let data = try await request(
+            .post,
+            path:
+                "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+                + "/reset-offsets/dry-run",
+            body: body
+        )
         guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             throw StreamlineError.serializationError("Expected array of consumer lag entries")
         }
@@ -272,17 +320,37 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Reset consumer group offsets (executes the reset).
     public func resetOffsets(groupId: String, topic: String, strategy: String = "earliest") async throws {
+        guard !groupId.isEmpty else {
+            throw StreamlineError.configurationError("consumer group ID must not be empty")
+        }
+        try TopicNameValidator.validate(topic)
         let body = try JSONSerialization.data(withJSONObject: ["topic": topic, "strategy": strategy])
-        _ = try await request(.post, path: "/v1/consumer-groups/\(groupId)/reset-offsets", body: body)
+        _ = try await request(
+            .post,
+            path:
+                "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+                + "/reset-offsets",
+            body: body
+        )
     }
 
     // MARK: - Message Inspection
 
     /// Browse messages from a topic partition.
     public func inspectMessages(topic: String, partition: Int = 0, offset: Int64? = nil, limit: Int = 20) async throws -> [InspectedMessage] {
+        try TopicNameValidator.validate(topic)
+        guard partition >= 0 else {
+            throw StreamlineError.configurationError("partition must not be negative")
+        }
+        guard limit > 0 else {
+            throw StreamlineError.configurationError("limit must be positive")
+        }
         var params = "?partition=\(partition)&limit=\(limit)"
         if let offset { params += "&offset=\(offset)" }
-        let data = try await request(.get, path: "/v1/inspect/\(topic)\(params)")
+        let data = try await request(
+            .get,
+            path: "/v1/inspect/\(URLPathSegmentEncoder.encode(topic))\(params)"
+        )
         guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             throw StreamlineError.serializationError("Expected array of messages")
         }
@@ -300,7 +368,16 @@ public final class AdminClient: @unchecked Sendable {
 
     /// Get the latest messages from a topic.
     public func latestMessages(topic: String, count: Int = 10) async throws -> [InspectedMessage] {
-        let data = try await request(.get, path: "/v1/inspect/\(topic)/latest?count=\(count)")
+        try TopicNameValidator.validate(topic)
+        guard count > 0 else {
+            throw StreamlineError.configurationError("count must be positive")
+        }
+        let data = try await request(
+            .get,
+            path:
+                "/v1/inspect/\(URLPathSegmentEncoder.encode(topic))"
+                + "/latest?count=\(count)"
+        )
         guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             throw StreamlineError.serializationError("Expected array of messages")
         }
@@ -346,9 +423,20 @@ public final class AdminClient: @unchecked Sendable {
     ///   - k: Maximum number of results (default 10).
     /// - Returns: Array of search results ordered by descending score.
     public func search(topic: String, query: String, k: Int = 10) async throws -> [SearchResult] {
+        try TopicNameValidator.validate(topic)
+        guard !query.isEmpty else {
+            throw StreamlineError.configurationError("search query must not be empty")
+        }
+        guard k > 0 else {
+            throw StreamlineError.configurationError("search result count must be positive")
+        }
         let payload: [String: Any] = ["query": query, "k": k]
         let bodyData = try JSONSerialization.data(withJSONObject: payload)
-        let data = try await request(.post, path: "/api/v1/topics/\(topic)/search", body: bodyData)
+        let data = try await request(
+            .post,
+            path: "/api/v1/topics/\(URLPathSegmentEncoder.encode(topic))/search",
+            body: bodyData
+        )
 
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hits = dict["hits"] as? [[String: Any]] else {

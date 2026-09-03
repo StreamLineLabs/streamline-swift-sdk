@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
 /// HTTP-based Schema Registry client for managing schemas.
 ///
 /// Uses Swift actor isolation for thread-safe access to the schema cache
@@ -236,6 +240,6 @@ public actor SchemaRegistryClient {
     }
 
     private func encode(_ subject: String) -> String {
-        subject.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? subject
+        URLPathSegmentEncoder.encode(subject)
     }
 }

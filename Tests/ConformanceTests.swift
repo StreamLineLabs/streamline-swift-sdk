@@ -261,6 +261,11 @@ final class AuthConformanceTests: XCTestCase {
         let tls = TlsConfig(enabled: true, caCertificatePath: "/etc/ssl/ca.pem")
         XCTAssertTrue(tls.enabled)
         XCTAssertEqual(tls.caCertificatePath, "/etc/ssl/ca.pem")
+        let config = StreamlineConfiguration(
+            url: URL(string: "wss://localhost:9092")!,
+            tls: tls
+        )
+        XCTAssertThrowsError(try config.validate())
     }
 
     func testA02_MutualTLS() {
@@ -272,12 +277,22 @@ final class AuthConformanceTests: XCTestCase {
         )
         XCTAssertEqual(tls.clientCertificatePath, "/etc/ssl/client.pem")
         XCTAssertEqual(tls.clientKeyPath, "/etc/ssl/client.key")
+        let config = StreamlineConfiguration(
+            url: URL(string: "wss://localhost:9092")!,
+            tls: tls
+        )
+        XCTAssertThrowsError(try config.validate())
     }
 
     func testA03_SASLPlain() {
         let sasl = SaslConfig(mechanism: .plain, username: "admin", password: "secret")
         XCTAssertEqual(sasl.mechanism, .plain)
         XCTAssertEqual(sasl.username, "admin")
+        let config = StreamlineConfiguration(
+            url: URL(string: "ws://localhost:9092")!,
+            sasl: sasl
+        )
+        XCTAssertThrowsError(try config.validate())
     }
 
     func testA04_SCRAMSHA256() {

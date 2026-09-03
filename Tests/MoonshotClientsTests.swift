@@ -93,6 +93,7 @@ final class MoonshotBranchAdminTests: XCTestCase {
                     ]
                 ])
             }
+
             XCTAssertEqual(req.httpMethod, "POST")
             return jsonResponse(201, json: ["name": "newb", "parent": "main", "created_at_ms": 99])
         }
@@ -111,6 +112,7 @@ final class MoonshotBranchAdminTests: XCTestCase {
             XCTAssertEqual(req.httpMethod, "DELETE")
             // "feature/a" should encode "/" as %2F
             XCTAssertTrue(req.url!.absoluteString.contains("feature%2Fa"))
+            XCTAssertFalse(req.url!.absoluteString.contains("%252F"))
             let resp = HTTPURLResponse(url: req.url!, statusCode: 204, httpVersion: "HTTP/1.1", headerFields: nil)!
             return (resp, Data())
         }

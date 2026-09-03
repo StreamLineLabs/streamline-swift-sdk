@@ -2,6 +2,10 @@ import XCTest
 @testable import StreamlineSDK
 import Foundation
 
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
 // MARK: - Mock URLProtocol for HTTP Testing
 
 /// A URLProtocol subclass that intercepts HTTP requests and returns mock responses.
@@ -124,6 +128,8 @@ final class AdminClientListTopicsTests: XCTestCase {
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }
@@ -175,7 +181,137 @@ final class AdminClientDescribeTopicTests: XCTestCase {
             } else {
                 XCTFail("Expected topicNotFound, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
+    }
+}
+
+// MARK: - URL Path Segment Encoding Tests
+//
+// AdminClient interpolates caller-supplied identifiers (consumer group IDs in
+// particular accept any non-empty string — TopicNameValidator only restricts
+// topic names) directly into HTTP request paths. Without percent-encoding,
+// a value such as "../v1/admin" or one containing "/" could make the actual
+// request target a different path than the one the caller specified. These
+// tests pin the behavior of ``URLPathSegmentEncoder`` and confirm AdminClient
+// applies it consistently before constructing a request URL.
+
+final class URLPathSegmentEncoderTests: XCTestCase {
+
+    func testUnreservedCharactersPassThroughUnchanged() {
+        let input = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        XCTAssertEqual(URLPathSegmentEncoder.encode(input), input)
+    }
+
+    func testPathSeparatorIsPercentEncoded() {
+        XCTAssertEqual(URLPathSegmentEncoder.encode("foo/bar"), "foo%2Fbar")
+    }
+
+    func testDotDotSegmentDoesNotSurviveAsLiteralTraversal() {
+        // "." and "_"/"-" are unreserved and pass through unencoded, but the
+        // "/" that would be needed to actually traverse a path is always
+        // encoded, so "../" can never become a real path separator.
+        XCTAssertEqual(URLPathSegmentEncoder.encode("../admin"), "..%2Fadmin")
+    }
+
+    func testSpaceAndReservedURLCharactersAreEncoded() {
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a b"), "a%20b")
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a?b"), "a%3Fb")
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a#b"), "a%23b")
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a&b=c"), "a%26b%3Dc")
+    }
+
+    func testEmptyStringEncodesToEmptyString() {
+        XCTAssertEqual(URLPathSegmentEncoder.encode(""), "")
+    }
+
+    func testNonASCIICharactersAreEncodedAsUTF8Bytes() {
+        // "é" is 2 UTF-8 bytes (0xC3 0xA9).
+        XCTAssertEqual(URLPathSegmentEncoder.encode("é"), "%C3%A9")
+    }
+}
+
+final class AdminClientPathEncodingTests: XCTestCase {
+
+    override func tearDown() {
+        MockURLProtocol.reset()
+        super.tearDown()
+    }
+
+    /// A malicious consumer group ID attempting a path traversal must not
+    /// change the request's actual path prefix — it must be confined to a
+    /// single, percent-encoded path segment.
+    func testConsumerGroupPathTraversalIsConfinedToOneSegment() async throws {
+        var capturedURL: URL?
+        MockURLProtocol.requestHandler = { request in
+            capturedURL = request.url
+            return jsonResponse(200, json: [
+                "id": "whatever", "state": "stable", "members": [Any](), "protocol": "consumer",
+            ])
+        }
+
+        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        _ = try await admin.describeConsumerGroup(groupId: "../v1/admin")
+
+        let url = try XCTUnwrap(capturedURL)
+        // Assert against the *encoded* wire path (`percentEncodedPath`), not
+        // the decoded `URL.path`. `.path` silently turns the escaped "%2F"
+        // back into a literal "/", which would make a safely-confined single
+        // segment indistinguishable from an actual, unescaped path-traversal
+        // segment — exactly the distinction this test exists to verify. Both
+        // forms decode to the same string, so checking `.path` alone cannot
+        // tell a safe encoded segment apart from a real traversal.
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let encodedPath = components.percentEncodedPath
+        XCTAssertTrue(
+            encodedPath.hasPrefix("/v1/consumer-groups/"),
+            "Path traversal must not escape the consumer-groups prefix, got: \(encodedPath)"
+        )
+        let segment = encodedPath.dropFirst("/v1/consumer-groups/".count)
+        XCTAssertFalse(
+            segment.contains("/"),
+            "Traversal must be confined to a single opaque segment, got: \(encodedPath)"
+        )
+        XCTAssertEqual(encodedPath, "/v1/consumer-groups/..%2Fv1%2Fadmin")
+    }
+
+    func testConsumerGroupIdWithSlashIsPercentEncodedInRequestPath() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return jsonResponse(200, json: [
+                "id": "a/b", "state": "stable", "members": [Any](), "protocol": "consumer",
+            ])
+        }
+
+        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        _ = try await admin.describeConsumerGroup(groupId: "a/b")
+
+        let request = try XCTUnwrap(capturedRequest)
+        let url = try XCTUnwrap(request.url)
+        // The raw request URL must carry the encoded form, not a literal "/".
+        XCTAssertTrue(url.absoluteString.contains("a%2Fb"))
+        // Assert against the encoded path, not the decoded `URL.path`: `.path`
+        // would turn "%2F" back into "/", making the assertion below
+        // trivially (and incorrectly) pass even if encoding were broken.
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertFalse(components.percentEncodedPath.hasSuffix("/a/b"))
+        XCTAssertTrue(components.percentEncodedPath.hasSuffix("a%2Fb"))
+    }
+
+    func testDeleteConsumerGroupEncodesSpecialCharacters() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return jsonResponse(200, json: [String: Any]())
+        }
+
+        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        try await admin.deleteConsumerGroup(groupId: "group with spaces")
+
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertTrue(request.url!.absoluteString.contains("group%20with%20spaces"))
     }
 }
 
@@ -465,6 +601,8 @@ final class AdminClientAuthTests: XCTestCase {
             } else {
                 XCTFail("Expected authenticationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }
@@ -493,6 +631,8 @@ final class AdminClientErrorResponseTests: XCTestCase {
             } else {
                 XCTFail("Expected topicNotFound, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -511,6 +651,8 @@ final class AdminClientErrorResponseTests: XCTestCase {
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -529,6 +671,8 @@ final class AdminClientErrorResponseTests: XCTestCase {
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -547,6 +691,8 @@ final class AdminClientErrorResponseTests: XCTestCase {
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }
@@ -782,10 +928,12 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             session: makeMockSession()
         )
         _ = try await registry.getSchema(subject: "s", version: 1)
-        XCTAssertEqual(await registry.cacheCount, 1)
+        let countAfterFetch = await registry.cacheCount
+        XCTAssertEqual(countAfterFetch, 1)
 
         await registry.clearCache()
-        XCTAssertEqual(await registry.cacheCount, 0)
+        let countAfterClear = await registry.cacheCount
+        XCTAssertEqual(countAfterClear, 0)
     }
 
     func testSchemaRegistryAuthHeader() async throws {
@@ -821,6 +969,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected authenticationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -842,6 +992,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -863,6 +1015,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -924,6 +1078,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected authenticationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -987,6 +1143,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected topicNotFound, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -1093,6 +1251,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 

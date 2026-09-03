@@ -23,10 +23,12 @@ public struct StreamlineConfiguration: Sendable {
     /// Optional authentication token.
     public let authToken: String?
 
-    /// TLS configuration for secure connections.
+    /// TLS requirement. Only platform-default trust with a `wss://` URL is
+    /// supported; custom CA, mTLS, and insecure options are rejected.
     public let tls: TlsConfig?
 
-    /// SASL authentication configuration.
+    /// Retained for source compatibility. SASL is currently unsupported and
+    /// non-nil values are rejected by ``validate()`` and ``StreamlineClient/connect()``.
     public let sasl: SaslConfig?
 
     /// Producer configuration.
@@ -66,18 +68,65 @@ public struct StreamlineConfiguration: Sendable {
         self.initialBackoff = initialBackoff
         self.maxBackoff = maxBackoff
     }
+
+    /// Validate that all values are well formed and supported by the current
+    /// URLSession WebSocket transport.
+    public func validate() throws {
+        try ConfigValidator.validate(self)
+    }
 }
-
-
 
 /// Validates configuration before client initialization.
 enum ConfigValidator {
     static func validate(_ config: StreamlineConfiguration) throws {
-        guard config.url.absoluteString.count > 0 else {
-            throw StreamlineError.configurationError("server URL must not be empty")
+        guard let scheme = config.url.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss"
+        else {
+            throw StreamlineError.configurationError("server URL must use ws:// or wss://")
         }
         guard config.timeout > 0 else {
             throw StreamlineError.configurationError("timeout must be positive")
         }
+        guard config.maxRetries >= 0 else {
+            throw StreamlineError.configurationError("maxRetries must not be negative")
+        }
+        guard config.initialBackoff > 0 else {
+            throw StreamlineError.configurationError("initialBackoff must be positive")
+        }
+        guard config.maxBackoff > 0 else {
+            throw StreamlineError.configurationError("maxBackoff must be positive")
+        }
+        guard config.initialBackoff <= config.maxBackoff else {
+            throw StreamlineError.configurationError("initialBackoff must not exceed maxBackoff")
+        }
+        if let token = config.authToken, token.isEmpty {
+            throw StreamlineError.configurationError("authToken must not be empty")
+        }
+
+        if let tls = config.tls {
+            guard tls.caCertificatePath == nil,
+                  tls.clientCertificatePath == nil,
+                  tls.clientKeyPath == nil,
+                  !tls.insecureSkipVerify
+            else {
+                throw StreamlineError.configurationError(
+                    "custom CA, mutual TLS, and insecure TLS options are unsupported"
+                )
+            }
+            if tls.enabled && scheme != "wss" {
+                throw StreamlineError.configurationError(
+                    "TLS requires a wss:// server URL"
+                )
+            }
+        }
+
+        if config.sasl != nil {
+            throw StreamlineError.configurationError(
+                "SASL is unsupported by the WebSocket transport; use authToken"
+            )
+        }
+
+        try config.producerConfig.validate()
+        try config.consumerConfig.validate()
     }
 }

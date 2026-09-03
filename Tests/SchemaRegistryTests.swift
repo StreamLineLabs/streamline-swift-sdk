@@ -1,10 +1,15 @@
 import XCTest
 @testable import StreamlineSDK
+import Foundation
+
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // MARK: - Mock URLProtocol
 
 /// A custom URLProtocol that intercepts requests for testing.
-final class MockURLProtocol: URLProtocol {
+final class SchemaRegistryURLProtocol: URLProtocol {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -34,7 +39,7 @@ private let baseURL = URL(string: "http://localhost:9094")!
 
 private func makeSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [MockURLProtocol.self]
+    config.protocolClasses = [SchemaRegistryURLProtocol.self]
     return URLSession(configuration: config)
 }
 
@@ -53,7 +58,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Registration
 
     func testRegisterSchemaReturnsId() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/subjects/orders-value/versions"))
             XCTAssertEqual(request.httpMethod, "POST")
             return (httpResponse(), jsonData(["id": 42]))
@@ -68,8 +73,26 @@ final class SchemaRegistryClientTests: XCTestCase {
         XCTAssertEqual(id, 42)
     }
 
+    func testSubjectIsEncodedAsSinglePathSegment() async throws {
+        SchemaRegistryURLProtocol.requestHandler = { request in
+            let absoluteURL = try XCTUnwrap(request.url?.absoluteString)
+            XCTAssertTrue(absoluteURL.contains("/subjects/team%2Forders/versions"))
+            XCTAssertFalse(absoluteURL.contains("%252F"))
+            return (httpResponse(), jsonData(["id": 7]))
+        }
+
+        let client = SchemaRegistryClient(baseURL: baseURL, session: makeSession())
+        let id = try await client.registerSchema(
+            subject: "team/orders",
+            schema: #"{"type":"object"}"#,
+            format: .json
+        )
+
+        XCTAssertEqual(id, 7)
+    }
+
     func testRegisterSchemaInvalidResponse() async {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(), jsonData(["unexpected": "data"]))
         }
 
@@ -92,7 +115,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "id": 1, "subject": "events-value", "version": 2,
             "schemaType": "AVRO", "schema": #"{"type":"string"}"#,
         ]
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/subjects/events-value/versions/2"))
             return (httpResponse(), jsonData(responseBody))
         }
@@ -111,7 +134,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "id": 5, "subject": "users-value", "version": 3,
             "schema_type": "JSON", "schema": "{}",
         ]
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/versions/latest"))
             return (httpResponse(), jsonData(responseBody))
         }
@@ -128,7 +151,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "id": 10, "subject": "test", "version": 1,
             "schemaType": "PROTOBUF", "schema": "syntax = \"proto3\";",
         ]
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/schemas/ids/10"))
             return (httpResponse(), jsonData(responseBody))
         }
@@ -142,7 +165,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Subject Listing
 
     func testListSubjects() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/subjects"))
             XCTAssertEqual(request.httpMethod, "GET")
             return (httpResponse(), jsonData(["orders-value", "users-value", "events-key"]))
@@ -154,7 +177,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testListSubjectsEmpty() async throws {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(), jsonData([String]()))
         }
 
@@ -166,7 +189,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Subject Deletion
 
     func testDeleteSubject() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/subjects/orders-value"))
             XCTAssertEqual(request.httpMethod, "DELETE")
             return (httpResponse(), jsonData([1, 2, 3]))
@@ -179,7 +202,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Compatibility Checking
 
     func testCheckCompatibilityReturnsTrue() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/compatibility/subjects/orders-value/versions/latest"))
             XCTAssertEqual(request.httpMethod, "POST")
             return (httpResponse(), jsonData(["is_compatible": true]))
@@ -195,7 +218,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testCheckCompatibilityReturnsFalse() async throws {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(), jsonData(["is_compatible": false]))
         }
 
@@ -211,7 +234,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Compatibility Level
 
     func testGetCompatibilityLevel() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/config/orders-value"))
             XCTAssertEqual(request.httpMethod, "GET")
             return (httpResponse(), jsonData(["compatibilityLevel": "BACKWARD"]))
@@ -223,7 +246,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testGetCompatibilityLevelAlternateKey() async throws {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(), jsonData(["compatibility": "FULL_TRANSITIVE"]))
         }
 
@@ -233,7 +256,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testSetCompatibilityLevel() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             XCTAssertTrue(request.url!.path.contains("/config/orders-value"))
             XCTAssertEqual(request.httpMethod, "PUT")
             let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
@@ -253,7 +276,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "id": 1, "subject": "cached-topic", "version": 1,
             "schemaType": "JSON", "schema": "{}",
         ]
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             requestCount += 1
             return (httpResponse(), jsonData(responseBody))
         }
@@ -277,7 +300,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "id": 7, "subject": "latest-topic", "version": 5,
             "schemaType": "AVRO", "schema": "{}",
         ]
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             requestCount += 1
             return (httpResponse(), jsonData(responseBody))
         }
@@ -300,7 +323,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "schemaType": "JSON", "schema": "{}",
         ]
         var requestCount = 0
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             requestCount += 1
             return (httpResponse(), jsonData(responseBody))
         }
@@ -327,7 +350,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "schemaType": "JSON", "schema": "{}",
         ]
         var requestCount = 0
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             requestCount += 1
             if request.httpMethod == "DELETE" {
                 return (httpResponse(), jsonData([1]))
@@ -349,7 +372,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Error Handling
 
     func testNotFoundError() async {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(statusCode: 404), Data())
         }
 
@@ -367,7 +390,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testUnauthorizedError() async {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(statusCode: 401), Data("Forbidden".utf8))
         }
 
@@ -384,7 +407,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testNetworkFailureError() async {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             throw URLError(.notConnectedToInternet)
         }
 
@@ -402,7 +425,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testServerError() async {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(statusCode: 500), Data("Internal Server Error".utf8))
         }
 
@@ -420,7 +443,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testConflictError() async {
-        MockURLProtocol.requestHandler = { _ in
+        SchemaRegistryURLProtocol.requestHandler = { _ in
             (httpResponse(statusCode: 409), Data("Conflict".utf8))
         }
 
@@ -440,7 +463,7 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Auth Token
 
     func testAuthTokenSentInHeader() async throws {
-        MockURLProtocol.requestHandler = { request in
+        SchemaRegistryURLProtocol.requestHandler = { request in
             let auth = request.value(forHTTPHeaderField: "Authorization")
             XCTAssertEqual(auth, "Bearer my-secret-token")
             return (httpResponse(), jsonData(["orders-value"]))
