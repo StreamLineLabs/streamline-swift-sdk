@@ -437,24 +437,24 @@ final class PerformanceConformanceTests: XCTestCase {
 
     func testF01_Throughput1KB() {
         let value = String(repeating: "x", count: 1024)
-        let start = CFAbsoluteTimeGetCurrent()
+        let start = Date().timeIntervalSinceReferenceDate
         for i in 0..<10_000 {
             _ = StreamlineMessage(topic: "perf", key: "k-\(i)", stringValue: value)
         }
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        let elapsed = Date().timeIntervalSinceReferenceDate - start
         XCTAssertLessThan(elapsed, 10.0, "10k message creations took \(elapsed)s, expected < 10s")
     }
 
     func testF02_LatencyP99() {
         var times: [Double] = []
         for _ in 0..<1000 {
-            let start = CFAbsoluteTimeGetCurrent()
+            let start = Date().timeIntervalSinceReferenceDate
             _ = StreamlineConfiguration(
                 url: URL(string: "ws://localhost:9092")!, autoReconnect: true, maxRetries: 10,
                 tls: TlsConfig(enabled: true),
                 sasl: SaslConfig(mechanism: .scramSha256, username: "u", password: "p")
             )
-            times.append(CFAbsoluteTimeGetCurrent() - start)
+            times.append(Date().timeIntervalSinceReferenceDate - start)
         }
         times.sort()
         let p99 = times[Int(Double(times.count) * 0.99)]
@@ -462,10 +462,10 @@ final class PerformanceConformanceTests: XCTestCase {
     }
 
     func testF03_StartupTime() {
-        let start = CFAbsoluteTimeGetCurrent()
+        let start = Date().timeIntervalSinceReferenceDate
         let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
         _ = StreamlineClient(configuration: config)
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        let elapsed = Date().timeIntervalSinceReferenceDate - start
         XCTAssertLessThan(elapsed, 1.0, "Client instantiation took \(elapsed)s, expected < 1s")
     }
 

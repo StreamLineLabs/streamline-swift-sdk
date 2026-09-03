@@ -6,6 +6,11 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v13)],
     products: [
         .library(name: "StreamlineSDK", targets: ["StreamlineSDK"]),
+        .executable(name: "BasicUsage", targets: ["BasicUsage"]),
+        .executable(name: "CircuitBreakerUsage", targets: ["CircuitBreakerUsage"]),
+        .executable(name: "QueryUsage", targets: ["QueryUsage"]),
+        .executable(name: "SchemaRegistryUsage", targets: ["SchemaRegistryUsage"]),
+        .executable(name: "SecurityUsage", targets: ["SecurityUsage"]),
     ],
     dependencies: [
         // StreamlineVerifier conditionally imports CryptoKit when available
@@ -38,6 +43,71 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
             path: "Sources/StreamlineSDK"
+        ),
+        .executableTarget(
+            name: "BasicUsage",
+            dependencies: ["StreamlineSDK"],
+            path: "examples",
+            exclude: [
+                "README.md",
+                "CircuitBreakerUsage.swift",
+                "QueryUsage.swift",
+                "SchemaRegistryUsage.swift",
+                "SecurityUsage.swift",
+            ],
+            sources: ["BasicUsage.swift"]
+        ),
+        .executableTarget(
+            name: "CircuitBreakerUsage",
+            dependencies: ["StreamlineSDK"],
+            path: "examples",
+            exclude: [
+                "README.md",
+                "BasicUsage.swift",
+                "QueryUsage.swift",
+                "SchemaRegistryUsage.swift",
+                "SecurityUsage.swift",
+            ],
+            sources: ["CircuitBreakerUsage.swift"]
+        ),
+        .executableTarget(
+            name: "QueryUsage",
+            dependencies: ["StreamlineSDK"],
+            path: "examples",
+            exclude: [
+                "README.md",
+                "BasicUsage.swift",
+                "CircuitBreakerUsage.swift",
+                "SchemaRegistryUsage.swift",
+                "SecurityUsage.swift",
+            ],
+            sources: ["QueryUsage.swift"]
+        ),
+        .executableTarget(
+            name: "SchemaRegistryUsage",
+            dependencies: ["StreamlineSDK"],
+            path: "examples",
+            exclude: [
+                "README.md",
+                "BasicUsage.swift",
+                "CircuitBreakerUsage.swift",
+                "QueryUsage.swift",
+                "SecurityUsage.swift",
+            ],
+            sources: ["SchemaRegistryUsage.swift"]
+        ),
+        .executableTarget(
+            name: "SecurityUsage",
+            dependencies: ["StreamlineSDK"],
+            path: "examples",
+            exclude: [
+                "README.md",
+                "BasicUsage.swift",
+                "CircuitBreakerUsage.swift",
+                "QueryUsage.swift",
+                "SchemaRegistryUsage.swift",
+            ],
+            sources: ["SecurityUsage.swift"]
         ),
         .testTarget(
             name: "StreamlineSDKTests",

@@ -34,7 +34,7 @@ struct BasicUsage {
         // -- Streaming Client (WebSocket) --
         let client = StreamlineClient(configuration: config)
         client.connect()
-        print("✓ Connected to Streamline")
+        print("✓ Connection initiated; queued messages flush after WebSocket readiness")
 
         // Produce messages
         for i in 1...5 {

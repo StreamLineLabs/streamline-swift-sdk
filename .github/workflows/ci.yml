@@ -16,9 +16,27 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - name: Build
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
+        if: runner.os == 'Linux'
+        with:
+          # ubuntu-latest ships no Swift toolchain at all; macOS keeps using
+          # Xcode's bundled toolchain. 6.1 is required on Linux — see the
+          # swift-crypto dependency comment in Package.swift for why (it's a
+          # swift-corelibs-foundation URLSession/WebSocket completeness
+          # floor, independent of the dependency, plus the minimum needed to
+          # parse the pinned swift-crypto manifest).
+          swift-version: '6.1'
+
+      - name: Validate package metadata
+        run: |
+          swift package dump-package
+          swift package show-dependencies --format json
+
+      - name: Build SDK and examples
         run: swift build
 
       - name: Test
@@ -33,12 +51,12 @@ jobs:
             xcrun llvm-cov export \
               "$BIN/StreamlineSDKPackageTests.xctest/Contents/MacOS/StreamlineSDKPackageTests" \
               -instr-profile="$PROFDATA" \
-              -format=lcov > coverage.lcov 2>/dev/null || true
+              -format=lcov > coverage.lcov
           fi
 
       - name: Upload coverage
         if: matrix.os == 'macos-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: coverage.lcov
           fail_ci_if_error: false
@@ -46,21 +64,31 @@ jobs:
   lint:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Check formatting
         run: |
           if command -v swiftformat &> /dev/null; then
-            swiftformat --lint Sources/ Tests/ || true
+            swiftformat --lint Sources/ Tests/ examples/
           else
-            echo "swiftformat not installed — skipping lint"
+            echo "swiftformat is not configured on this runner"
           fi
 
   integration-test:
     runs-on: ubuntu-latest
     needs: [check]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
+        with:
+          # ubuntu-latest ships no Swift toolchain at all. See the `check`
+          # job above / Package.swift for why 6.1 is required.
+          swift-version: '6.1'
 
       - name: Start Streamline
         run: docker compose -f docker-compose.test.yml up -d
@@ -68,17 +96,20 @@ jobs:
       - name: Wait for server
         run: |
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:9094/health/live > /dev/null 2>&1; then
+            if curl -sf http://localhost:9094/health > /dev/null 2>&1; then
               echo "Server is ready"
               exit 0
             fi
+            echo "Waiting for Streamline... ($i/30)"
             sleep 2
           done
           echo "Server failed to start" && exit 1
 
       - name: Run integration tests
-        run: swift test --filter ConformanceTests
-        continue-on-error: true
+        run: swift test --filter IntegrationTests
+        env:
+          STREAMLINE_HTTP_URL: http://localhost:9094
+          STREAMLINE_WEBSOCKET_URL: ws://localhost:9092
 
       - name: Teardown
         if: always()

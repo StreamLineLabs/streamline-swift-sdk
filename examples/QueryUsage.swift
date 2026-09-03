@@ -19,16 +19,21 @@ struct QueryUsage {
     static func main() async throws {
         let bootstrap = ProcessInfo.processInfo.environment["STREAMLINE_BOOTSTRAP"] ?? "localhost:9092"
         let httpUrl = ProcessInfo.processInfo.environment["STREAMLINE_HTTP"] ?? "http://localhost:9094"
+        let websocketURL = URL(string: "ws://\(bootstrap)")!
+        let adminURL = URL(string: httpUrl)!
 
-        let client = StreamlineClient(bootstrap: bootstrap)
-        let admin = AdminClient(baseURL: httpUrl)
+        let client = StreamlineClient(
+            configuration: StreamlineConfiguration(url: websocketURL)
+        )
+        let admin = AdminClient(baseURL: adminURL)
+        client.connect()
 
         // Produce sample data
-        try await admin.createTopic("events", partitions: 1)
+        try await admin.createTopic(name: "events", partitions: 1)
         for i in 0..<10 {
-            try await client.produce(
+            try client.produce(
                 topic: "events",
-                value: #"{"user":"user-\#(i)","action":"click","value":\#(i * 10)}"#
+                stringValue: #"{"user":"user-\#(i)","action":"click","value":\#(i * 10)}"#
             )
         }
         print("Produced 10 events")
@@ -57,7 +62,7 @@ struct QueryUsage {
             print("  \(row)")
         }
 
-        client.close()
+        client.disconnect()
         print("\nDone!")
     }
 }
