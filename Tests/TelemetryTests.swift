@@ -139,20 +139,27 @@ final class TelemetryTests: XCTestCase {
         XCTAssertEqual(traced.state, .disconnected)
     }
 
-    func testTracedClientTransactionLifecycle() {
+    func testTracedClientTransactionsFailClosed() {
         let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
         let client = StreamlineClient(configuration: config)
         let traced = TracedClient(client: client, telemetry: ConsoleTelemetry())
-        XCTAssertNoThrow(try traced.beginTransaction())
-        XCTAssertNoThrow(try traced.abortTransaction())
+        XCTAssertThrowsError(try traced.beginTransaction())
+        XCTAssertThrowsError(try traced.commitTransaction())
+        XCTAssertThrowsError(try traced.abortTransaction())
     }
 
-    func testTracedClientDoubleBeginThrows() {
+    func testTracedClientBeginTransactionReportsUnsupported() {
         let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
         let client = StreamlineClient(configuration: config)
         let traced = TracedClient(client: client, telemetry: NoOpTelemetry())
-        XCTAssertNoThrow(try traced.beginTransaction())
-        XCTAssertThrowsError(try traced.beginTransaction())
+        XCTAssertThrowsError(try traced.beginTransaction()) { error in
+            guard let streamlineError = error as? StreamlineError,
+                  case .transaction(let message) = streamlineError
+            else {
+                return XCTFail("Expected transaction error")
+            }
+            XCTAssertTrue(message.contains("unsupported"))
+        }
     }
 
     // MARK: - TracedAdminClient

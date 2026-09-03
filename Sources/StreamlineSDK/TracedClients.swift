@@ -53,8 +53,9 @@ public enum TelemetryAttributes {
 
 /// Wraps a ``StreamlineClient`` with automatic telemetry instrumentation.
 ///
-/// Every produce, subscribe, poll, and transaction operation creates a span
-/// following OpenTelemetry messaging semantic conventions.
+/// Produce, subscribe, and poll operations create spans following OpenTelemetry
+/// messaging semantic conventions. Deprecated transaction calls emit an error
+/// span and fail closed.
 ///
 /// ```swift
 /// let telemetry = ConsoleTelemetry()
@@ -82,7 +83,7 @@ public final class TracedClient: @unchecked Sendable {
     public func connect() {
         let span = telemetry.startSpan(topic: "", operation: "connect")
         client.connect()
-        span.setAttribute("status", value: "connected")
+        span.setAttribute("status", value: String(describing: client.state))
         telemetry.endSpan(span)
     }
 
@@ -165,43 +166,34 @@ public final class TracedClient: @unchecked Sendable {
         }
     }
 
-    /// Begin a transaction with tracing.
+    /// Transactions are unsupported by the current WebSocket wire protocol.
+    @available(*, deprecated, message: "Transactions are unsupported and always throw.")
     public func beginTransaction() throws {
         let span = telemetry.startSpan(topic: "", operation: "transaction.begin")
-        do {
-            try client.beginTransaction()
-            telemetry.endSpan(span)
-        } catch {
-            span.setError(error)
-            telemetry.endSpan(span, error: error.localizedDescription)
-            throw error
-        }
+        let error = StreamlineClient.unsupportedTransactionError()
+        span.setError(error)
+        telemetry.endSpan(span, error: error.localizedDescription)
+        throw error
     }
 
-    /// Commit a transaction with tracing.
+    /// Transactions are unsupported by the current WebSocket wire protocol.
+    @available(*, deprecated, message: "Transactions are unsupported and always throw.")
     public func commitTransaction() throws {
         let span = telemetry.startSpan(topic: "", operation: "transaction.commit")
-        do {
-            try client.commitTransaction()
-            telemetry.endSpan(span)
-        } catch {
-            span.setError(error)
-            telemetry.endSpan(span, error: error.localizedDescription)
-            throw error
-        }
+        let error = StreamlineClient.unsupportedTransactionError()
+        span.setError(error)
+        telemetry.endSpan(span, error: error.localizedDescription)
+        throw error
     }
 
-    /// Abort a transaction with tracing.
+    /// Transactions are unsupported by the current WebSocket wire protocol.
+    @available(*, deprecated, message: "Transactions are unsupported and always throw.")
     public func abortTransaction() throws {
         let span = telemetry.startSpan(topic: "", operation: "transaction.abort")
-        do {
-            try client.abortTransaction()
-            telemetry.endSpan(span)
-        } catch {
-            span.setError(error)
-            telemetry.endSpan(span, error: error.localizedDescription)
-            throw error
-        }
+        let error = StreamlineClient.unsupportedTransactionError()
+        span.setError(error)
+        telemetry.endSpan(span, error: error.localizedDescription)
+        throw error
     }
 
     /// Flush pending batches with tracing.

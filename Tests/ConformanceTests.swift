@@ -51,13 +51,14 @@ final class ProducerConformanceTests: XCTestCase {
         XCTAssertEqual(config.lingerMs, 0)
         XCTAssertEqual(config.compression, .none)
         XCTAssertEqual(config.retries, 3)
-        XCTAssertEqual(config.acks, .one)
+        XCTAssertEqual(config.acks, .none)
     }
 
     func testP07_Idempotent() {
         let config = ProducerConfig(idempotent: true, acks: .all)
         XCTAssertTrue(config.idempotent)
         XCTAssertEqual(config.acks, .all)
+        XCTAssertThrowsError(try config.validate())
     }
 
     func testP08_Timeout() {
@@ -139,7 +140,9 @@ final class ConsumerGroupConformanceTests: XCTestCase {
 
     func testG02_CommitOffset() {
         let config = ConsumerConfig()
-        XCTAssertTrue(config.autoCommit)
+        // autoCommit defaults to false: there is no verified broker commit
+        // contract, so the neutral standalone default must validate.
+        XCTAssertFalse(config.autoCommit)
         XCTAssertEqual(config.autoCommitIntervalMs, 5000)
     }
 

@@ -10,9 +10,11 @@ final class ErrorCodeTests: XCTestCase {
             .connection, .timeout, .authentication, .authorization,
             .topicNotFound, .partitionNotFound, .protocol, .serialization,
             .schema, .configuration, .internal, .circuitOpen,
+            .contractViolation, .attestationFailed, .memoryAccessDenied,
+            .branchQuotaExceeded, .semanticSearchUnavailable, .unsupported,
         ]
-        XCTAssertEqual(codes.count, 12)
-        XCTAssertEqual(ErrorCode.allCases.count, 12)
+        XCTAssertEqual(codes.count, 18)
+        XCTAssertEqual(ErrorCode.allCases.count, 18)
     }
 
     func testErrorCodeRawValues() {
@@ -73,6 +75,12 @@ final class ErrorCodeMappingTests: XCTestCase {
 
     func testConfigurationErrorMapsToConfiguration() {
         XCTAssertEqual(StreamlineError.configurationError("bad url").errorCode, .configuration)
+    }
+
+    func testUnsupportedMapsToUnsupportedAndIsNotRetryable() {
+        let error = StreamlineError.unsupported("no acknowledgement contract")
+        XCTAssertEqual(error.errorCode, .unsupported)
+        XCTAssertFalse(error.isRetryable)
     }
 
     func testOfflineQueueFullMapsToInternal() {
@@ -247,6 +255,7 @@ final class ErrorHintTests: XCTestCase {
             .schemaRegistryError("x"),
             .circuitOpen,
             .internalError("x"),
+            .unsupported("x"),
         ]
         for error in errors {
             XCTAssertFalse(error.hint.isEmpty, "\(error) has empty hint")
@@ -306,13 +315,15 @@ final class OffsetManagementTests: XCTestCase {
         return StreamlineClient(configuration: config)
     }
 
-    func testCommitOffsetsThrowsWhenDisconnected() async {
+    func testCommitOffsetsFailsClosedAsUnsupported() async {
         let client = makeClient()
         do {
             try await client.commitOffsets(["events:0": 42])
-            XCTFail("Expected notConnected error")
+            XCTFail("Expected unsupported error")
         } catch let error as StreamlineError {
-            XCTAssertEqual(error, .notConnected)
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -354,16 +365,32 @@ final class OffsetManagementTests: XCTestCase {
         }
     }
 
-    func testPositionReturnsNilInitially() async {
+    func testPositionFailsClosedAsUnsupported() async {
         let client = makeClient()
-        let pos = await client.position(topic: "events", partition: 0)
-        XCTAssertNil(pos)
+        do {
+            _ = try await client.queryPosition(topic: "events", partition: 0)
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
-    func testCommittedReturnsNilInitially() async {
+    func testCommittedFailsClosedAsUnsupported() async {
         let client = makeClient()
-        let committed = await client.committed(topic: "events", partition: 0)
-        XCTAssertNil(committed)
+        do {
+            _ = try await client.queryCommitted(topic: "events", partition: 0)
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 }
 

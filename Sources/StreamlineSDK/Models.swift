@@ -19,17 +19,49 @@ public struct StreamlineMessage: Sendable, Equatable {
     /// Server-assigned timestamp (nil for outbound messages).
     public let timestamp: Date?
 
-    public init(topic: String, key: String? = nil, value: Data, offset: Int64? = nil, timestamp: Date? = nil) {
+    /// Server-assigned partition (nil for outbound messages).
+    public let partition: Int?
+
+    /// Message headers returned by the server.
+    public let headers: [String: String]
+
+    public init(
+        topic: String,
+        key: String? = nil,
+        value: Data,
+        offset: Int64? = nil,
+        timestamp: Date? = nil,
+        partition: Int? = nil,
+        headers: [String: String] = [:]
+    ) {
         self.topic = topic
         self.key = key
         self.value = value
         self.offset = offset
         self.timestamp = timestamp
+        self.partition = partition
+        self.headers = headers
     }
 
     /// Convenience initializer that encodes a UTF-8 string as the value.
-    public init(topic: String, key: String? = nil, stringValue: String, offset: Int64? = nil, timestamp: Date? = nil) {
-        self.init(topic: topic, key: key, value: Data(stringValue.utf8), offset: offset, timestamp: timestamp)
+    public init(
+        topic: String,
+        key: String? = nil,
+        stringValue: String,
+        offset: Int64? = nil,
+        timestamp: Date? = nil,
+        partition: Int? = nil,
+        headers: [String: String] = [:]
+    ) {
+        self.init(
+            topic: topic,
+            key: key,
+            value: Data(stringValue.utf8),
+            offset: offset,
+            timestamp: timestamp,
+            partition: partition,
+            headers: headers
+        )
     }
 }
 
@@ -329,6 +361,7 @@ public enum ErrorCode: String, Sendable, Equatable, CaseIterable {
     case memoryAccessDenied
     case branchQuotaExceeded
     case semanticSearchUnavailable
+    case unsupported
 }
 
 // MARK: - Errors
@@ -401,6 +434,9 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// Semantic search is unavailable (embedding provider down).
     case semanticSearchUnavailable(String)
 
+    /// The requested operation has no verified protocol contract in this SDK.
+    case unsupported(String)
+
     // MARK: - Computed Properties
 
     /// Programmatic error classification.
@@ -440,6 +476,8 @@ public enum StreamlineError: Error, Sendable, Equatable {
             return .branchQuotaExceeded
         case .semanticSearchUnavailable:
             return .semanticSearchUnavailable
+        case .unsupported:
+            return .unsupported
         }
     }
 
@@ -461,7 +499,7 @@ public enum StreamlineError: Error, Sendable, Equatable {
         case .connectionFailed(let reason):
             return "Connection failed (\(reason)). Verify the server URL and network connectivity."
         case .authenticationFailed:
-            return "Check your authToken, or SASL username/password credentials."
+            return "Check your authToken and confirm the server accepts bearer authentication."
         case .authorizationFailed:
             return "The authenticated identity lacks permission for this operation. Check ACLs."
         case .timeout:
@@ -489,7 +527,7 @@ public enum StreamlineError: Error, Sendable, Equatable {
         case .internalError(let reason):
             return "Internal error (\(reason)). This may indicate a bug — please report it."
         case .transaction(let reason):
-            return "Transaction error (\(reason)). Ensure transactions are properly begun before commit/abort."
+            return "Transaction error (\(reason)). Transactions are unsupported by the current WebSocket transport."
         case .contractViolation(let topic, _):
             return "Record violated the data contract for topic '\(topic)'. Validate the record against the registered schema."
         case .attestationFailed:
@@ -500,6 +538,8 @@ public enum StreamlineError: Error, Sendable, Equatable {
             return "Branch '\(branch)' exceeded its quota. Increase branch quotas or clean up unused branches."
         case .semanticSearchUnavailable:
             return "Semantic search is unavailable. Check embedding provider connectivity and configuration."
+        case .unsupported(let reason):
+            return "Unsupported operation (\(reason)). This SDK refused to claim success without a verified protocol contract."
         }
     }
 }
