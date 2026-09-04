@@ -1,7 +1,7 @@
 import Foundation
 
 /// SDK version constant, kept in sync with the organization release.
-public let streamlineSDKVersion = "0.3.0"
+public let streamlineSDKVersion = "0.4.0"
 
 /// Configuration for connecting to a Streamline server.
 ///

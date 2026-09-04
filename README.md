@@ -13,7 +13,7 @@ Swift client SDK for [Streamline](https://github.com/streamlinelabs/streamline) 
 
 - Swift 5.9+ on Apple platforms; Swift 6.1+ on Linux
 - iOS 15+ / macOS 13+
-- Streamline server 0.2.0 or later
+- Streamline server 0.4.0
 
 ## Installation
 
@@ -23,7 +23,7 @@ Add the dependency to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/streamlinelabs/streamline-swift-sdk.git", from: "0.2.0"),
+    .package(url: "https://github.com/streamlinelabs/streamline-swift-sdk.git", from: "0.4.0"),
 ]
 ```
 

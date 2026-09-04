@@ -26,6 +26,8 @@ package: ## Build release
 	swift build -c release
 
 integration-test: ## Run integration tests (requires Docker)
+	@docker manifest inspect ghcr.io/streamlinelabs/streamline:0.4.0 >/dev/null || \
+		{ echo "Pinned Streamline 0.4.0 integration image is unavailable or requires credentials"; exit 1; }
 	docker compose -f docker-compose.test.yml up -d
 	@trap 'docker compose -f docker-compose.test.yml down -v' EXIT; \
 		echo "Waiting for Streamline server..."; \

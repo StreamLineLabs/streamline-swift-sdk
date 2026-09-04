@@ -42,6 +42,7 @@ swift test
 # Compile every runnable example
 swift build
 
+# Run the pinned 0.4.0 integration fixture
 make integration-test
 ```
 
