@@ -303,7 +303,7 @@ final class ClientInitializationTests: XCTestCase {
 final class ClientConnectionStateTests: XCTestCase {
     private func makeClient(autoReconnect: Bool = true) -> StreamlineClient {
         let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+            url: requiredTestValue(URL(string: "ws://localhost:9092")),
             autoReconnect: autoReconnect
         )
         return StreamlineClient(configuration: config)
@@ -422,7 +422,9 @@ final class ReconnectRaceRegressionTests: XCTestCase {
 
 final class UnsupportedOffsetProtocolTests: XCTestCase {
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
@@ -533,7 +535,9 @@ final class UnsupportedOffsetProtocolTests: XCTestCase {
 
 final class OfflineQueueTests: XCTestCase {
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
@@ -679,7 +683,9 @@ final class OfflineQueueTests: XCTestCase {
 
 final class SubscriptionManagementTests: XCTestCase {
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
@@ -752,7 +758,9 @@ final class SubscriptionManagementTests: XCTestCase {
 
 final class OffsetManagementExtendedTests: XCTestCase {
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 

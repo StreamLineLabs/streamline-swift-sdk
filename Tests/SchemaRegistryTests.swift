@@ -40,7 +40,7 @@ final class SchemaRegistryURLProtocol: URLProtocol {
 
 // MARK: - Helpers
 
-private let baseURL = URL(string: "http://localhost:9094")!
+private let baseURL = requiredTestValue(URL(string: "http://localhost:9094"))
 
 private func makeSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral
@@ -49,11 +49,13 @@ private func makeSession() -> URLSession {
 }
 
 private func jsonData(_ object: Any) -> Data {
-    try! JSONSerialization.data(withJSONObject: object)
+    testJSONData(object)
 }
 
 private func httpResponse(statusCode: Int = 200) -> HTTPURLResponse {
-    HTTPURLResponse(url: baseURL, statusCode: statusCode, httpVersion: nil, headerFields: nil)!
+    requiredTestValue(
+        HTTPURLResponse(url: baseURL, statusCode: statusCode, httpVersion: nil, headerFields: nil)
+    )
 }
 
 // MARK: - SchemaRegistryClient Tests
@@ -62,18 +64,28 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Registration
 
     func testRegisterSchemaReturnsId() async throws {
+        let recorder = URLRequestRecorder()
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/subjects/orders-value/versions"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/subjects/orders-value/versions"))
             XCTAssertEqual(request.httpMethod, "POST")
             return (httpResponse(), jsonData(["id": 42]))
         }
 
-        let client = SchemaRegistryClient(baseURL: baseURL, session: makeSession())
+        let client = SchemaRegistryClient(
+            baseURL: baseURL,
+            session: makeSession(),
+            requestObserver: { recorder.record($0) }
+        )
         let id = try await client.registerSchema(
             subject: "orders-value",
             schema: #"{"type":"object"}"#,
             format: .json
         )
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["schemaType"] as? String, "JSON")
+        XCTAssertEqual(body["schema"] as? String, #"{"type":"object"}"#)
         XCTAssertEqual(id, 42)
     }
 
@@ -120,7 +132,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "schemaType": "AVRO", "schema": #"{"type":"string"}"#,
         ]
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/subjects/events-value/versions/2"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/subjects/events-value/versions/2"))
             return (httpResponse(), jsonData(responseBody))
         }
 
@@ -139,7 +151,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "schema_type": "JSON", "schema": "{}",
         ]
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/versions/latest"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/versions/latest"))
             return (httpResponse(), jsonData(responseBody))
         }
 
@@ -156,7 +168,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             "schemaType": "PROTOBUF", "schema": "syntax = \"proto3\";",
         ]
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/schemas/ids/10"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/schemas/ids/10"))
             return (httpResponse(), jsonData(responseBody))
         }
 
@@ -170,7 +182,7 @@ final class SchemaRegistryClientTests: XCTestCase {
 
     func testListSubjects() async throws {
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/subjects"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/subjects"))
             XCTAssertEqual(request.httpMethod, "GET")
             return (httpResponse(), jsonData(["orders-value", "users-value", "events-key"]))
         }
@@ -194,7 +206,7 @@ final class SchemaRegistryClientTests: XCTestCase {
 
     func testDeleteSubject() async throws {
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/subjects/orders-value"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/subjects/orders-value"))
             XCTAssertEqual(request.httpMethod, "DELETE")
             return (httpResponse(), jsonData([1, 2, 3]))
         }
@@ -206,18 +218,30 @@ final class SchemaRegistryClientTests: XCTestCase {
     // MARK: - Compatibility Checking
 
     func testCheckCompatibilityReturnsTrue() async throws {
+        let recorder = URLRequestRecorder()
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/compatibility/subjects/orders-value/versions/latest"))
+            XCTAssertTrue(
+                try XCTUnwrap(request.url).path.contains("/compatibility/subjects/orders-value/versions/latest")
+            )
             XCTAssertEqual(request.httpMethod, "POST")
             return (httpResponse(), jsonData(["is_compatible": true]))
         }
 
-        let client = SchemaRegistryClient(baseURL: baseURL, session: makeSession())
+        let client = SchemaRegistryClient(
+            baseURL: baseURL,
+            session: makeSession(),
+            requestObserver: { recorder.record($0) }
+        )
         let compatible = try await client.checkCompatibility(
             subject: "orders-value",
             schema: #"{"type":"object"}"#,
             format: .json
         )
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["schemaType"] as? String, "JSON")
+        XCTAssertEqual(body["schema"] as? String, #"{"type":"object"}"#)
         XCTAssertTrue(compatible)
     }
 
@@ -239,7 +263,7 @@ final class SchemaRegistryClientTests: XCTestCase {
 
     func testGetCompatibilityLevel() async throws {
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/config/orders-value"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/config/orders-value"))
             XCTAssertEqual(request.httpMethod, "GET")
             return (httpResponse(), jsonData(["compatibilityLevel": "BACKWARD"]))
         }
@@ -260,16 +284,23 @@ final class SchemaRegistryClientTests: XCTestCase {
     }
 
     func testSetCompatibilityLevel() async throws {
+        let recorder = URLRequestRecorder()
         SchemaRegistryURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/config/orders-value"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/config/orders-value"))
             XCTAssertEqual(request.httpMethod, "PUT")
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
-            XCTAssertEqual(body["compatibility"], "FORWARD")
             return (httpResponse(), jsonData(["compatibility": "FORWARD"]))
         }
 
-        let client = SchemaRegistryClient(baseURL: baseURL, session: makeSession())
+        let client = SchemaRegistryClient(
+            baseURL: baseURL,
+            session: makeSession(),
+            requestObserver: { recorder.record($0) }
+        )
         try await client.setCompatibilityLevel(subject: "orders-value", level: .forward)
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: String].self)
+        XCTAssertEqual(body["compatibility"], "FORWARD")
     }
 
     // MARK: - Cache Behavior

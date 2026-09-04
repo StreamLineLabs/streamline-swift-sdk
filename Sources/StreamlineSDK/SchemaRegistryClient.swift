@@ -23,6 +23,7 @@ public actor SchemaRegistryClient {
     private let baseURL: URL
     private let authToken: String?
     private let session: URLSession
+    private let requestObserver: HTTPRequestObserver?
     private var cache: [String: SchemaInfo] = [:]
 
     // MARK: - Init
@@ -31,6 +32,19 @@ public actor SchemaRegistryClient {
         self.baseURL = baseURL
         self.authToken = authToken
         self.session = session
+        requestObserver = nil
+    }
+
+    init(
+        baseURL: URL,
+        authToken: String? = nil,
+        session: URLSession = .shared,
+        requestObserver: @escaping HTTPRequestObserver
+    ) {
+        self.baseURL = baseURL
+        self.authToken = authToken
+        self.session = session
+        self.requestObserver = requestObserver
     }
 
     // MARK: - Cache Management
@@ -213,6 +227,8 @@ public actor SchemaRegistryClient {
             urlRequest.httpBody = body
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+
+        requestObserver?(urlRequest)
 
         let (data, response): (Data, URLResponse)
         do {

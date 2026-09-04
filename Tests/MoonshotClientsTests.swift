@@ -9,8 +9,6 @@ import XCTest
 
 final class MoonshotURLProtocol: URLProtocol {
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-    static var capturedRequests: [URLRequest] = []
-    static var capturedBodies: [Data] = []
 
     override class func canInit(with _: URLRequest) -> Bool {
         true
@@ -21,24 +19,6 @@ final class MoonshotURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        Self.capturedRequests.append(request)
-        if let stream = request.httpBodyStream {
-            stream.open()
-            var data = Data()
-            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 1024)
-            defer { buf.deallocate() }
-            while stream.hasBytesAvailable {
-                let n = stream.read(buf, maxLength: 1024)
-                if n <= 0 {
-                    break
-                }
-                data.append(buf, count: n)
-            }
-            stream.close()
-            Self.capturedBodies.append(data)
-        } else if let body = request.httpBody {
-            Self.capturedBodies.append(body)
-        }
         guard let handler = Self.requestHandler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
@@ -57,8 +37,6 @@ final class MoonshotURLProtocol: URLProtocol {
 
     static func reset() {
         requestHandler = nil
-        capturedRequests = []
-        capturedBodies = []
     }
 }
 
@@ -69,16 +47,25 @@ private func mockSession() -> URLSession {
 }
 
 private func jsonResponse(_ status: Int, json: Any) -> (HTTPURLResponse, Data) {
-    let url = URL(string: "http://localhost:9094")!
-    let resp = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
-                               headerFields: ["Content-Type": "application/json"])!
-    let data = try! JSONSerialization.data(withJSONObject: json)
+    let url = requiredTestValue(URL(string: "http://localhost:9094"))
+    let resp = requiredTestValue(
+        HTTPURLResponse(
+            url: url,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )
+    )
+    let data = testJSONData(json)
     return (resp, data)
 }
 
 private func opts(token: String? = nil) -> MoonshotOptions {
-    MoonshotOptions(httpURL: URL(string: "http://localhost:9094")!,
-                    authToken: token, session: mockSession())
+    MoonshotOptions(
+        httpURL: requiredTestValue(URL(string: "http://localhost:9094")),
+        authToken: token,
+        session: mockSession()
+    )
 }
 
 // MARK: - Tests
@@ -94,7 +81,7 @@ final class MoonshotBranchAdminTests: XCTestCase {
             nthRequest += 1
             if nthRequest == 1 {
                 XCTAssertEqual(req.httpMethod, "GET")
-                XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/branches"))
+                XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/branches"))
                 return jsonResponse(200, json: [
                     "branches": [
                         ["name": "main", "parent": NSNull(), "created_at_ms": 1],
@@ -120,9 +107,12 @@ final class MoonshotBranchAdminTests: XCTestCase {
         MoonshotURLProtocol.requestHandler = { req in
             XCTAssertEqual(req.httpMethod, "DELETE")
             // "feature/a" should encode "/" as %2F
-            XCTAssertTrue(req.url!.absoluteString.contains("feature%2Fa"))
-            XCTAssertFalse(req.url!.absoluteString.contains("%252F"))
-            let resp = HTTPURLResponse(url: req.url!, statusCode: 204, httpVersion: "HTTP/1.1", headerFields: nil)!
+            let url = try XCTUnwrap(req.url)
+            XCTAssertTrue(url.absoluteString.contains("feature%2Fa"))
+            XCTAssertFalse(url.absoluteString.contains("%252F"))
+            let resp = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 204, httpVersion: "HTTP/1.1", headerFields: nil)
+            )
             return (resp, Data())
         }
         let admin = BranchAdminClient(opts())
@@ -176,8 +166,14 @@ final class MoonshotContractsTests: XCTestCase {
 
     func testServerErrorThrows() async {
         MoonshotURLProtocol.requestHandler = { req in
-            let resp = HTTPURLResponse(url: req.url!, statusCode: 500, httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "text/plain"])!
+            let resp = try XCTUnwrap(
+                try HTTPURLResponse(
+                    url: XCTUnwrap(req.url),
+                    statusCode: 500,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "text/plain"]
+                )
+            )
             return (resp, Data("nope".utf8))
         }
         let c = ContractsClient(opts())
@@ -218,12 +214,12 @@ final class MoonshotAttestationTests: XCTestCase {
         MoonshotURLProtocol.requestHandler = { req in
             n += 1
             if n == 1 {
-                XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/attest/sign"))
+                XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/attest/sign"))
                 return jsonResponse(200, json: [
                     "key_id": "k", "algorithm": "ed25519", "signature": "sig", "payload_hash": "h",
                 ])
             }
-            XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/attest/verify"))
+            XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/attest/verify"))
             return jsonResponse(200, json: ["valid": true])
         }
         let a = AttestationClient(opts(), defaultKeyId: "k")
@@ -273,7 +269,7 @@ final class MoonshotMemoryTests: XCTestCase {
         MoonshotURLProtocol.requestHandler = { req in
             n += 1
             if n == 1 {
-                XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/memory"))
+                XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/memory"))
                 return jsonResponse(200, json: ["ok": true])
             }
             return jsonResponse(200, json: [

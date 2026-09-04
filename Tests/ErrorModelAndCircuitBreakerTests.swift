@@ -305,7 +305,9 @@ final class NewErrorCaseTests: XCTestCase {
 
 final class OffsetManagementTests: XCTestCase {
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 

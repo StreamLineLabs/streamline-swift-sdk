@@ -22,6 +22,7 @@ public final class AdminClient: @unchecked Sendable {
     private let baseURL: URL
     private let authToken: String?
     private let session: URLSession
+    private let requestObserver: HTTPRequestObserver?
 
     // MARK: - Init
 
@@ -29,6 +30,19 @@ public final class AdminClient: @unchecked Sendable {
         self.baseURL = baseURL
         self.authToken = authToken
         self.session = session
+        requestObserver = nil
+    }
+
+    init(
+        baseURL: URL,
+        authToken: String? = nil,
+        session: URLSession = .shared,
+        requestObserver: @escaping HTTPRequestObserver
+    ) {
+        self.baseURL = baseURL
+        self.authToken = authToken
+        self.session = session
+        self.requestObserver = requestObserver
     }
 
     // MARK: - Topic Operations
@@ -477,6 +491,8 @@ public final class AdminClient: @unchecked Sendable {
             urlRequest.httpBody = body
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+
+        requestObserver?(urlRequest)
 
         let (data, response): (Data, URLResponse)
         do {

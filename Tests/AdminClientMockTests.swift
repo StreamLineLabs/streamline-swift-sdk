@@ -14,9 +14,6 @@ final class MockURLProtocol: URLProtocol {
     /// Handler type: receives a request and returns (response, data) or throws.
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
-    /// Captured requests for assertion.
-    static var capturedRequests: [URLRequest] = []
-
     override class func canInit(with _: URLRequest) -> Bool {
         true
     }
@@ -26,23 +23,13 @@ final class MockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        let handledRequest: URLRequest
-        do {
-            handledRequest = try Self.materializingBody(in: request)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-            return
-        }
-
-        MockURLProtocol.capturedRequests.append(handledRequest)
-
         guard let handler = MockURLProtocol.requestHandler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }
 
         do {
-            let (response, data) = try handler(handledRequest)
+            let (response, data) = try handler(request)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
@@ -55,35 +42,6 @@ final class MockURLProtocol: URLProtocol {
 
     static func reset() {
         requestHandler = nil
-        capturedRequests = []
-    }
-
-    private static func materializingBody(in originalRequest: URLRequest) throws -> URLRequest {
-        var request = originalRequest
-        guard request.httpBody == nil, let stream = request.httpBodyStream else {
-            return request
-        }
-
-        stream.open()
-        defer { stream.close() }
-
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
-        defer { buffer.deallocate() }
-
-        var body = Data()
-        while true {
-            let count = stream.read(buffer, maxLength: 4096)
-            if count < 0 {
-                throw stream.streamError ?? URLError(.cannotDecodeContentData)
-            }
-            if count == 0 {
-                break
-            }
-            body.append(buffer, count: count)
-        }
-
-        request.httpBody = body
-        return request
     }
 }
 
@@ -96,14 +54,14 @@ private func makeMockSession() -> URLSession {
 }
 
 private func jsonResponse(_ statusCode: Int, json: Any, url: URL? = nil) -> (HTTPURLResponse, Data) {
-    let responseURL = url ?? URL(string: "http://localhost:9094")!
-    let response = HTTPURLResponse(
+    let responseURL = url ?? requiredTestValue(URL(string: "http://localhost:9094"))
+    let response = requiredTestValue(HTTPURLResponse(
         url: responseURL,
         statusCode: statusCode,
         httpVersion: "HTTP/1.1",
         headerFields: ["Content-Type": "application/json"]
-    )!
-    let data = try! JSONSerialization.data(withJSONObject: json)
+    ))
+    let data = testJSONData(json)
     return (response, data)
 }
 
@@ -117,7 +75,7 @@ final class AdminClientListTopicsTests: XCTestCase {
 
     func testListTopicsReturnsTopics() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics"))
             XCTAssertEqual(request.httpMethod, "GET")
             return jsonResponse(200, json: [
                 ["name": "events", "partitions": 3, "replication_factor": 1, "message_count": 100],
@@ -178,7 +136,7 @@ final class AdminClientDescribeTopicTests: XCTestCase {
 
     func testDescribeTopicReturnsDescription() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics/events"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics/events"))
             return jsonResponse(200, json: [
                 "name": "events",
                 "partitions": 6,
@@ -356,43 +314,55 @@ final class AdminClientTopicMutationTests: XCTestCase {
     }
 
     func testCreateTopicSendsCorrectPayload() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics"))
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
-
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["name"] as? String, "new-topic")
-            XCTAssertEqual(body["partitions"] as? Int, 3)
-            XCTAssertEqual(body["replication_factor"] as? Int, 2)
-
             return jsonResponse(201, json: ["created": true])
         }
 
-        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
+        )
         try await admin.createTopic(name: "new-topic", partitions: 3, replicationFactor: 2)
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics"))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["name"] as? String, "new-topic")
+        XCTAssertEqual(body["partitions"] as? Int, 3)
+        XCTAssertEqual(body["replication_factor"] as? Int, 2)
     }
 
     func testCreateTopicWithConfig() async throws {
-        MockURLProtocol.requestHandler = { request in
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertNotNil(body["config"])
-            let config = body["config"] as! [String: String]
-            XCTAssertEqual(config["retention.ms"], "3600000")
-            return jsonResponse(201, json: ["created": true])
+        let recorder = URLRequestRecorder()
+        MockURLProtocol.requestHandler = { _ in
+            jsonResponse(201, json: ["created": true])
         }
 
-        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
+        )
         try await admin.createTopic(
             name: "configured-topic",
             config: ["retention.ms": "3600000"]
         )
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        let config = try XCTUnwrap(body["config"] as? [String: String])
+        XCTAssertEqual(config["retention.ms"], "3600000")
     }
 
     func testDeleteTopicSendsDeleteRequest() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "DELETE")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics/old-topic"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics/old-topic"))
             return jsonResponse(200, json: ["deleted": true])
         }
 
@@ -461,7 +431,9 @@ final class AdminClientConsumerGroupTests: XCTestCase {
     func testDeleteConsumerGroup() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "DELETE")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/consumer-groups/group-1"))
+            XCTAssertTrue(
+                try XCTUnwrap(request.url).absoluteString.contains("/v1/consumer-groups/group-1")
+            )
             return jsonResponse(200, json: ["deleted": true])
         }
 
@@ -478,16 +450,12 @@ final class AdminClientQueryTests: XCTestCase {
         super.tearDown()
     }
 
-    func testQueryReturnsResults() async throws {
+    func testQueryReturnsResultsAndCapturesBodyBeforeURLSession() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
             let url = try XCTUnwrap(request.url)
             XCTAssertTrue(url.absoluteString.contains("/v1/query"))
-
-            let bodyData = try XCTUnwrap(request.httpBody)
-            let jsonObject = try JSONSerialization.jsonObject(with: bodyData)
-            let body = try XCTUnwrap(jsonObject as? [String: Any])
-            XCTAssertEqual(body["query"] as? String, "SELECT * FROM events LIMIT 5")
 
             return jsonResponse(200, json: [
                 "columns": ["key", "value", "offset"],
@@ -496,9 +464,18 @@ final class AdminClientQueryTests: XCTestCase {
             ])
         }
 
-        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
+        )
         let result = try await admin.query("SELECT * FROM events LIMIT 5")
 
+        // The observer runs before URLSession can transform the request, so
+        // this assertion is identical under Foundation and FoundationNetworking.
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["query"] as? String, "SELECT * FROM events LIMIT 5")
         XCTAssertEqual(result.columns, ["key", "value", "offset"])
         XCTAssertEqual(result.rows.count, 2)
         XCTAssertEqual(result.rows[0], ["k1", "v1", "0"])
@@ -533,7 +510,7 @@ final class AdminClientServerInfoTests: XCTestCase {
 
     func testServerInfoReturnsData() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/info"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/info"))
             return jsonResponse(200, json: [
                 "version": "0.2.0",
                 "uptime": 7200,
@@ -735,24 +712,28 @@ final class SchemaRegistryClientMockTests: XCTestCase {
     }
 
     func testRegisterSchemaReturnsId() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertTrue(request.url!.absoluteString.contains("/subjects/orders-value/versions"))
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["schemaType"] as? String, "JSON")
-            XCTAssertNotNil(body["schema"])
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/subjects/orders-value/versions"))
             return jsonResponse(200, json: ["id": 42])
         }
 
         let registry = try SchemaRegistryClient(
             baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
-            session: makeMockSession()
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
         )
         let id = try await registry.registerSchema(
             subject: "orders-value",
             schema: #"{"type":"object"}"#,
             format: .json
         )
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["schemaType"] as? String, "JSON")
+        XCTAssertEqual(body["schema"] as? String, #"{"type":"object"}"#)
         XCTAssertEqual(id, 42)
     }
 
@@ -895,18 +876,22 @@ final class SchemaRegistryClientMockTests: XCTestCase {
     }
 
     func testSetCompatibilityLevel() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "PUT")
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["compatibility"] as? String, "FULL")
             return jsonResponse(200, json: ["compatibility": "FULL"])
         }
 
         let registry = try SchemaRegistryClient(
             baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
-            session: makeMockSession()
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
         )
         try await registry.setCompatibilityLevel(subject: "events-value", level: .full)
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["compatibility"] as? String, "FULL")
     }
 
     func testDeleteSubject() async throws {
@@ -1052,7 +1037,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testClusterInfoReturnsClusterDetails() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.hasSuffix("/v1/cluster"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.hasSuffix("/v1/cluster"))
             return jsonResponse(200, json: [
                 "cluster_id": "cluster-abc",
                 "broker_id": 1,
@@ -1115,7 +1100,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testConsumerGroupLagReturnsLagDetails() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/consumer-groups/my-group/lag"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/consumer-groups/my-group/lag"))
             return jsonResponse(200, json: [
                 "group_id": "my-group",
                 "partitions": [
@@ -1138,7 +1123,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testConsumerGroupTopicLagReturnsScopedLag() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/lag/events"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/lag/events"))
             return jsonResponse(200, json: [
                 "group_id": "my-group",
                 "partitions": [
@@ -1180,7 +1165,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testResetOffsetsDryRunReturnsProjectedChanges() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("reset-offsets/dry-run"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("reset-offsets/dry-run"))
             XCTAssertEqual(request.httpMethod, "POST")
             return jsonResponse(200, json: [
                 ["topic": "events", "partition": 0, "current_offset": 100, "end_offset": 100, "lag": 0],
@@ -1198,8 +1183,9 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testResetOffsetsSendsPostRequest() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("reset-offsets"))
-            XCTAssertFalse(request.url!.path.contains("dry-run"))
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.path.contains("reset-offsets"))
+            XCTAssertFalse(url.path.contains("dry-run"))
             XCTAssertEqual(request.httpMethod, "POST")
             return jsonResponse(200, json: [:] as [String: Any])
         }
@@ -1212,8 +1198,9 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testInspectMessagesReturnsMessagesWithHeaders() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/v1/inspect/events"))
-            let query = request.url!.query ?? ""
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.path.contains("/v1/inspect/events"))
+            let query = url.query ?? ""
             XCTAssertTrue(query.contains("partition=0"))
             XCTAssertTrue(query.contains("limit=5"))
             return jsonResponse(200, json: [
@@ -1234,7 +1221,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testInspectMessagesWithOffset() async throws {
         MockURLProtocol.requestHandler = { request in
-            let query = request.url!.query ?? ""
+            let query = try XCTUnwrap(request.url).query ?? ""
             XCTAssertTrue(query.contains("offset=100"))
             return jsonResponse(200, json: [] as [Any])
         }
@@ -1246,8 +1233,9 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testLatestMessagesReturnsRecentMessages() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.hasSuffix("/latest"))
-            let query = request.url!.query ?? ""
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.path.hasSuffix("/latest"))
+            let query = url.query ?? ""
             XCTAssertTrue(query.contains("count=3"))
             return jsonResponse(200, json: [
                 ["offset": 97, "value": "msg1", "timestamp": 3000, "partition": 0, "headers": [:] as [String: String]],
@@ -1288,7 +1276,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testMetricsHistoryReturnsMetricPoints() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/v1/metrics/history"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/v1/metrics/history"))
             return jsonResponse(200, json: [
                 ["name": "bytes_in", "value": 1024.5, "labels": ["topic": "events"], "timestamp": 1000],
                 ["name": "bytes_out", "value": 512.0, "labels": [:] as [String: String], "timestamp": 1001],
