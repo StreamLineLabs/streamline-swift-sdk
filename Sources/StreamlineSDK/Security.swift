@@ -21,21 +21,21 @@ public struct TlsConfig: Sendable, Equatable {
 
     /// Configure TLS as disabled.
     public init() {
-        self.enabled = false
-        self.caCertificatePath = nil
-        self.clientCertificatePath = nil
-        self.clientKeyPath = nil
-        self.insecureSkipVerify = false
+        enabled = false
+        caCertificatePath = nil
+        clientCertificatePath = nil
+        clientKeyPath = nil
+        insecureSkipVerify = false
     }
 
     /// Configure platform-default TLS. Set `enabled` to true and use a
     /// `wss://` URL in ``StreamlineConfiguration``.
     public init(enabled: Bool) {
         self.enabled = enabled
-        self.caCertificatePath = nil
-        self.clientCertificatePath = nil
-        self.clientKeyPath = nil
-        self.insecureSkipVerify = false
+        caCertificatePath = nil
+        clientCertificatePath = nil
+        clientKeyPath = nil
+        insecureSkipVerify = false
     }
 
     /// Retained for source compatibility. Validation rejects custom TLS
@@ -111,7 +111,7 @@ public final class TelemetrySpan: @unchecked Sendable {
         self.name = name
         self.topic = topic
         self.operation = operation
-        self.startTime = Date()
+        startTime = Date()
     }
 
     /// Duration since span start, in seconds.
@@ -159,7 +159,7 @@ public protocol Telemetry: Sendable {
 
 public extension Telemetry {
     /// Start a span with a custom name and attributes dictionary.
-    func startSpan(_ name: String, attributes: [String: String]) -> TelemetrySpan {
+    func startSpan(_: String, attributes: [String: String]) -> TelemetrySpan {
         let topic = attributes[TelemetryAttributes.messagingDestinationName] ?? ""
         let operation = attributes[TelemetryAttributes.messagingOperation] ?? ""
         let span = startSpan(topic: topic, operation: operation)
@@ -183,8 +183,8 @@ public final class NoOpTelemetry: Telemetry, @unchecked Sendable {
         TelemetrySpan(name: "\(topic) \(operation)", topic: topic, operation: operation)
     }
 
-    public func endSpan(_ span: TelemetrySpan) {}
-    public func endSpan(_ span: TelemetrySpan, error: String) {}
+    public func endSpan(_: TelemetrySpan) {}
+    public func endSpan(_: TelemetrySpan, error _: String) {}
 }
 
 /// Console-based telemetry that prints timing information to stdout.
@@ -230,8 +230,8 @@ public enum TraceContext {
     }
 
     private static func generateHexId(length: Int) -> String {
-        (0..<length).map { _ in
-            String(format: "%x", Int.random(in: 0..<16))
+        (0 ..< length).map { _ in
+            String(format: "%x", Int.random(in: 0 ..< 16))
         }.joined()
     }
 }

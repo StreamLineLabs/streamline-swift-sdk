@@ -1,11 +1,11 @@
 #if canImport(CryptoKit)
-import CryptoKit
+    import CryptoKit
 #else
-import Crypto
+    import Crypto
 #endif
 import Foundation
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 final class StreamlineVerifierTests: XCTestCase {
     private let privateKey = Curve25519.Signing.PrivateKey()

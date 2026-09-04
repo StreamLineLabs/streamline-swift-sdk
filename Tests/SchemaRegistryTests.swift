@@ -1,9 +1,9 @@
-import XCTest
-@testable import StreamlineSDK
 import Foundation
+@testable import StreamlineSDK
+import XCTest
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 // MARK: - Mock URLProtocol
@@ -12,8 +12,13 @@ import FoundationNetworking
 final class SchemaRegistryURLProtocol: URLProtocol {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
         guard let handler = Self.requestHandler else {
@@ -54,7 +59,6 @@ private func httpResponse(statusCode: Int = 200) -> HTTPURLResponse {
 // MARK: - SchemaRegistryClient Tests
 
 final class SchemaRegistryClientTests: XCTestCase {
-
     // MARK: - Registration
 
     func testRegisterSchemaReturnsId() async throws {
@@ -381,7 +385,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             _ = try await client.getLatestSchema(subject: "nonexistent")
             XCTFail("Expected error")
         } catch {
-            guard case StreamlineError.schemaRegistryError(let msg) = error else {
+            guard case let StreamlineError.schemaRegistryError(msg) = error else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
                 return
             }
@@ -416,7 +420,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             _ = try await client.listSubjects()
             XCTFail("Expected error")
         } catch {
-            guard case StreamlineError.schemaRegistryError(let msg) = error else {
+            guard case let StreamlineError.schemaRegistryError(msg) = error else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
                 return
             }
@@ -434,7 +438,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             _ = try await client.registerSchema(subject: "s", schema: "{}", format: .json)
             XCTFail("Expected error")
         } catch {
-            guard case StreamlineError.schemaRegistryError(let msg) = error else {
+            guard case let StreamlineError.schemaRegistryError(msg) = error else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
                 return
             }
@@ -452,7 +456,7 @@ final class SchemaRegistryClientTests: XCTestCase {
             _ = try await client.registerSchema(subject: "s", schema: "{}", format: .json)
             XCTFail("Expected error")
         } catch {
-            guard case StreamlineError.schemaRegistryError(let msg) = error else {
+            guard case let StreamlineError.schemaRegistryError(msg) = error else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
                 return
             }
@@ -493,7 +497,6 @@ final class SchemaRegistryClientTests: XCTestCase {
 // MARK: - Model Tests
 
 final class SchemaRegistryModelTests: XCTestCase {
-
     // MARK: - CompatibilityLevel
 
     func testCompatibilityLevelRawValues() {

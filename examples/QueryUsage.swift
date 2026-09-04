@@ -30,7 +30,7 @@ struct QueryUsage {
 
         // Produce sample data
         try await admin.createTopic(name: "events", partitions: 1)
-        for i in 0..<10 {
+        for i in 0 ..< 10 {
             try client.produce(
                 topic: "events",
                 stringValue: #"{"user":"user-\#(i)","action":"click","value":\#(i * 10)}"#

@@ -18,7 +18,6 @@ import Foundation
 /// pool.disconnectAll()
 /// ```
 public final class ConnectionPool: @unchecked Sendable {
-
     // MARK: - Properties
 
     /// Pool size (number of connections).
@@ -37,7 +36,7 @@ public final class ConnectionPool: @unchecked Sendable {
     public init(configuration: StreamlineConfiguration, size: Int = 3) {
         precondition(size > 0, "Pool size must be at least 1")
         self.size = size
-        self.connections = (0..<size).map { _ in
+        connections = (0 ..< size).map { _ in
             StreamlineClient(configuration: configuration)
         }
     }

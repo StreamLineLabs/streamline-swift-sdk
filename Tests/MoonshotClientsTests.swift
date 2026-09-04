@@ -1,8 +1,8 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 // MARK: - URL protocol stub (local copy to avoid coupling to other test files)
@@ -12,8 +12,13 @@ final class MoonshotURLProtocol: URLProtocol {
     static var capturedRequests: [URLRequest] = []
     static var capturedBodies: [Data] = []
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
         Self.capturedRequests.append(request)
@@ -24,7 +29,9 @@ final class MoonshotURLProtocol: URLProtocol {
             defer { buf.deallocate() }
             while stream.hasBytesAvailable {
                 let n = stream.read(buf, maxLength: 1024)
-                if n <= 0 { break }
+                if n <= 0 {
+                    break
+                }
                 data.append(buf, count: n)
             }
             stream.close()
@@ -77,7 +84,9 @@ private func opts(token: String? = nil) -> MoonshotOptions {
 // MARK: - Tests
 
 final class MoonshotBranchAdminTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testListAndCreate() async throws {
         var nthRequest = 0
@@ -90,7 +99,7 @@ final class MoonshotBranchAdminTests: XCTestCase {
                     "branches": [
                         ["name": "main", "parent": NSNull(), "created_at_ms": 1],
                         ["name": "f", "parent": "main", "created_at_ms": 2],
-                    ]
+                    ],
                 ])
             }
 
@@ -141,7 +150,9 @@ final class MoonshotBranchAdminTests: XCTestCase {
 }
 
 final class MoonshotContractsTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testValidValidation() async throws {
         MoonshotURLProtocol.requestHandler = { _ in
@@ -182,7 +193,7 @@ final class MoonshotContractsTests: XCTestCase {
 
     func testRegisterAndGet() async throws {
         var n = 0
-        MoonshotURLProtocol.requestHandler = { req in
+        MoonshotURLProtocol.requestHandler = { _ in
             n += 1
             if n == 1 {
                 return jsonResponse(200, json: ["name": "orders", "version": 1])
@@ -198,7 +209,9 @@ final class MoonshotContractsTests: XCTestCase {
 }
 
 final class MoonshotAttestationTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testSignAndVerify() async throws {
         var n = 0
@@ -207,7 +220,7 @@ final class MoonshotAttestationTests: XCTestCase {
             if n == 1 {
                 XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/attest/sign"))
                 return jsonResponse(200, json: [
-                    "key_id": "k", "algorithm": "ed25519", "signature": "sig", "payload_hash": "h"
+                    "key_id": "k", "algorithm": "ed25519", "signature": "sig", "payload_hash": "h",
                 ])
             }
             XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/attest/verify"))
@@ -224,12 +237,14 @@ final class MoonshotAttestationTests: XCTestCase {
 }
 
 final class MoonshotSearchTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testSearchOK() async throws {
         MoonshotURLProtocol.requestHandler = { _ in
             jsonResponse(200, json: [
-                "hits": [["topic": "t", "partition": 1, "offset": 42, "score": 0.91, "snippet": "s"]]
+                "hits": [["topic": "t", "partition": 1, "offset": 42, "score": 0.91, "snippet": "s"]],
             ])
         }
         let s = SemanticSearchClient(opts())
@@ -249,7 +264,9 @@ final class MoonshotSearchTests: XCTestCase {
 }
 
 final class MoonshotMemoryTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testRememberAndRecall() async throws {
         var n = 0
@@ -262,8 +279,8 @@ final class MoonshotMemoryTests: XCTestCase {
             return jsonResponse(200, json: [
                 "memories": [[
                     "agent": "a", "kind": "fact", "text": "x",
-                    "tags": ["t1"], "timestamp_ms": 1
-                ]]
+                    "tags": ["t1"], "timestamp_ms": 1,
+                ]],
             ])
         }
         let m = MemoryClient(opts())
@@ -285,7 +302,9 @@ final class MoonshotMemoryTests: XCTestCase {
 }
 
 final class MoonshotAuthHeaderTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testAuthorizationHeaderForwarded() async throws {
         MoonshotURLProtocol.requestHandler = { req in

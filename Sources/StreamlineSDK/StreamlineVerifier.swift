@@ -1,7 +1,7 @@
 #if canImport(CryptoKit)
-@preconcurrency import CryptoKit
+    @preconcurrency import CryptoKit
 #else
-@preconcurrency import Crypto
+    @preconcurrency import Crypto
 #endif
 import Foundation
 
@@ -81,7 +81,6 @@ private struct AttestationEnvelope: Decodable {
 /// }
 /// ```
 public final class StreamlineVerifier: Sendable {
-
     /// Kafka header name carrying the attestation envelope.
     public static let attestHeader = "streamline-attest"
 
@@ -99,7 +98,7 @@ public final class StreamlineVerifier: Sendable {
     ///     Attestations asserting any other `key_id` are rejected before the
     ///     signature is checked.
     public init(publicKey: Curve25519.Signing.PublicKey, trustedKeyId: String) {
-        self.trustedKeys = [trustedKeyId: publicKey]
+        trustedKeys = [trustedKeyId: publicKey]
     }
 
     /// Creates a verifier that trusts multiple producer identities, each
@@ -140,8 +139,8 @@ public final class StreamlineVerifier: Sendable {
         init(trustedKeys:) to trust a specific key_id.
         """
     )
-    public init(publicKey: Curve25519.Signing.PublicKey) {
-        self.trustedKeys = [:]
+    public init(publicKey _: Curve25519.Signing.PublicKey) {
+        trustedKeys = [:]
     }
 
     /// Verify the attestation on a `StreamlineMessage`.
@@ -214,8 +213,8 @@ public final class StreamlineVerifier: Sendable {
 
         let canonical =
             "\(envelope.topic)|\(envelope.partition)|\(envelope.offset)"
-            + "|\(envelope.payloadSha256)|\(envelope.schemaId)"
-            + "|\(envelope.timestampMs)|\(envelope.keyId)"
+                + "|\(envelope.payloadSha256)|\(envelope.schemaId)"
+                + "|\(envelope.timestampMs)|\(envelope.keyId)"
 
         guard let canonicalData = canonical.data(using: .utf8) else {
             return .failed

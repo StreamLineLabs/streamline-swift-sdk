@@ -4,11 +4,11 @@ import Foundation
 
 /// Compression type for produced messages.
 public enum CompressionType: String, Sendable, Equatable {
-    case none = "none"
-    case gzip = "gzip"
-    case snappy = "snappy"
-    case lz4 = "lz4"
-    case zstd = "zstd"
+    case none
+    case gzip
+    case snappy
+    case lz4
+    case zstd
 }
 
 /// Acknowledgment level for produced messages.

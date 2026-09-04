@@ -1,6 +1,6 @@
 import Foundation
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 final class IntegrationTests: XCTestCase {
     func testAdminTopicLifecycleAgainstFixture() async throws {
@@ -73,13 +73,13 @@ private final class ConnectionDelegate: StreamlineClientDelegate {
         return error
     }
 
-    func client(_ client: StreamlineClient, didChangeState state: ConnectionState) {
+    func client(_: StreamlineClient, didChangeState state: ConnectionState) {
         if state == .connected {
             connected.fulfill()
         }
     }
 
-    func client(_ client: StreamlineClient, didEncounterError error: StreamlineError) {
+    func client(_: StreamlineClient, didEncounterError error: StreamlineError) {
         lock.lock()
         storedError = error
         lock.unlock()

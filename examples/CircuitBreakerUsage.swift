@@ -39,7 +39,7 @@ struct CircuitBreakerUsage {
         print("Connection initiated. Circuit state: \(cb.state())")
 
         // Send messages through the circuit breaker
-        for i in 0..<20 {
+        for i in 0 ..< 20 {
             do {
                 try cb.check()
                 try client.produce(topic: "cb-example", stringValue: "message-\(i)")

@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 /// HTTP-based admin client for managing Streamline server resources.
@@ -17,7 +17,6 @@ import FoundationNetworking
 /// let result = try await admin.query("SELECT * FROM events LIMIT 10")
 /// ```
 public final class AdminClient: @unchecked Sendable {
-
     // MARK: - Properties
 
     private let baseURL: URL
@@ -224,7 +223,7 @@ public final class AdminClient: @unchecked Sendable {
 
     /// List all brokers in the cluster.
     public func listBrokers() async throws -> [BrokerInfo] {
-        return try await clusterInfo().brokers
+        try await clusterInfo().brokers
     }
 
     // MARK: - Consumer Group Lag
@@ -267,7 +266,7 @@ public final class AdminClient: @unchecked Sendable {
         let data = try await request(
             .get,
             path:
-                "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+            "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
                 + "/lag/\(URLPathSegmentEncoder.encode(topic))"
         )
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -300,7 +299,7 @@ public final class AdminClient: @unchecked Sendable {
         let data = try await request(
             .post,
             path:
-                "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+            "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
                 + "/reset-offsets/dry-run",
             body: body
         )
@@ -328,7 +327,7 @@ public final class AdminClient: @unchecked Sendable {
         _ = try await request(
             .post,
             path:
-                "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
+            "/v1/consumer-groups/\(URLPathSegmentEncoder.encode(groupId))"
                 + "/reset-offsets",
             body: body
         )
@@ -346,7 +345,9 @@ public final class AdminClient: @unchecked Sendable {
             throw StreamlineError.configurationError("limit must be positive")
         }
         var params = "?partition=\(partition)&limit=\(limit)"
-        if let offset { params += "&offset=\(offset)" }
+        if let offset {
+            params += "&offset=\(offset)"
+        }
         let data = try await request(
             .get,
             path: "/v1/inspect/\(URLPathSegmentEncoder.encode(topic))\(params)"
@@ -375,7 +376,7 @@ public final class AdminClient: @unchecked Sendable {
         let data = try await request(
             .get,
             path:
-                "/v1/inspect/\(URLPathSegmentEncoder.encode(topic))"
+            "/v1/inspect/\(URLPathSegmentEncoder.encode(topic))"
                 + "/latest?count=\(count)"
         )
         guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
@@ -439,7 +440,8 @@ public final class AdminClient: @unchecked Sendable {
         )
 
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hits = dict["hits"] as? [[String: Any]] else {
+              let hits = dict["hits"] as? [[String: Any]]
+        else {
             return []
         }
 
@@ -488,7 +490,7 @@ public final class AdminClient: @unchecked Sendable {
         }
 
         switch httpResponse.statusCode {
-        case 200...299:
+        case 200 ... 299:
             return data
         case 401:
             let body = String(data: data, encoding: .utf8) ?? ""

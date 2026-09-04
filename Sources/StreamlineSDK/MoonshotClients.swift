@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 // MARK: - Errors & Options
@@ -19,10 +19,10 @@ public enum MoonshotError: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .httpStatus(let code, let body): return "moonshot HTTP \(code): \(body)"
-        case .transport(let err): return "transport error: \(err.localizedDescription)"
-        case .decode(let msg): return "decode error: \(msg)"
-        case .invalidArgument(let msg): return "invalid argument: \(msg)"
+        case let .httpStatus(code, body): "moonshot HTTP \(code): \(body)"
+        case let .transport(err): "transport error: \(err.localizedDescription)"
+        case let .decode(msg): "decode error: \(msg)"
+        case let .invalidArgument(msg): "invalid argument: \(msg)"
         }
     }
 }
@@ -67,7 +67,7 @@ public class MoonshotHTTPBase: @unchecked Sendable {
         if let token = opts.authToken {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        if let body = body {
+        if let body {
             do {
                 let data = try JSONSerialization.data(withJSONObject: body, options: [])
                 req.httpBody = data
@@ -88,7 +88,7 @@ public class MoonshotHTTPBase: @unchecked Sendable {
             throw MoonshotError.transport(URLError(.badServerResponse))
         }
         let code = http.statusCode
-        if !(200..<300).contains(code) && !acceptableStatuses.contains(code) {
+        if !(200 ..< 300).contains(code), !acceptableStatuses.contains(code) {
             let bodyString = String(data: data, encoding: .utf8) ?? ""
             throw MoonshotError.httpStatus(code: code, body: bodyString)
         }
@@ -122,7 +122,9 @@ public struct MergeReport: Sendable, Equatable {
 }
 
 public final class BranchAdminClient: MoonshotHTTPBase, @unchecked Sendable {
-    public override init(_ opts: MoonshotOptions) { super.init(opts) }
+    override public init(_ opts: MoonshotOptions) {
+        super.init(opts)
+    }
 
     public func listBranches() async throws -> [Branch] {
         let (_, data) = try await request(method: "GET", path: "/api/v1/branches")
@@ -135,9 +137,11 @@ public final class BranchAdminClient: MoonshotHTTPBase, @unchecked Sendable {
     public func createBranch(name: String, parent: String? = nil) async throws -> Branch {
         guard !name.isEmpty else { throw MoonshotError.invalidArgument("branch name required") }
         var body: [String: Any] = ["name": name]
-        if let parent = parent { body["parent"] = parent }
+        if let parent {
+            body["parent"] = parent
+        }
         let (_, data) = try await request(method: "POST", path: "/api/v1/branches", body: body)
-        return Self.toBranch(try parseObject(data))
+        return try Self.toBranch(parseObject(data))
     }
 
     public func deleteBranch(name: String) async throws {
@@ -179,7 +183,9 @@ public struct ContractValidationResult: Sendable, Equatable {
 }
 
 public final class ContractsClient: MoonshotHTTPBase, @unchecked Sendable {
-    public override init(_ opts: MoonshotOptions) { super.init(opts) }
+    override public init(_ opts: MoonshotOptions) {
+        super.init(opts)
+    }
 
     @discardableResult
     public func registerContract(_ contract: [String: Any]) async throws -> [String: Any] {
@@ -236,7 +242,7 @@ public final class AttestationClient: MoonshotHTTPBase, @unchecked Sendable {
         let body: [String: Any] = [
             "key_id": keyId ?? defaultKeyId,
             "algorithm": algorithm ?? defaultAlgorithm,
-            "payload_b64": payload.base64EncodedString()
+            "payload_b64": payload.base64EncodedString(),
         ]
         let (_, data) = try await request(method: "POST", path: "/api/v1/attest/sign", body: body)
         let o = try parseObject(data)
@@ -253,7 +259,7 @@ public final class AttestationClient: MoonshotHTTPBase, @unchecked Sendable {
             "key_id": attestation.keyId,
             "algorithm": attestation.algorithm,
             "signature": attestation.signature,
-            "payload_b64": payload.base64EncodedString()
+            "payload_b64": payload.base64EncodedString(),
         ]
         let (_, data) = try await request(method: "POST", path: "/api/v1/attest/verify", body: body)
         let o = try parseObject(data)
@@ -272,7 +278,9 @@ public struct SearchHit: Sendable, Equatable {
 }
 
 public final class SemanticSearchClient: MoonshotHTTPBase, @unchecked Sendable {
-    public override init(_ opts: MoonshotOptions) { super.init(opts) }
+    override public init(_ opts: MoonshotOptions) {
+        super.init(opts)
+    }
 
     public func search(topic: String, query: String, k: Int = 10) async throws -> [SearchHit] {
         guard !topic.isEmpty else { throw MoonshotError.invalidArgument("topic required") }
@@ -311,7 +319,9 @@ public struct MemoryRecord: Sendable, Equatable {
 }
 
 public final class MemoryClient: MoonshotHTTPBase, @unchecked Sendable {
-    public override init(_ opts: MoonshotOptions) { super.init(opts) }
+    override public init(_ opts: MoonshotOptions) {
+        super.init(opts)
+    }
 
     public func remember(agent: String, kind: MemoryKind, text: String, tags: [String] = []) async throws {
         guard !agent.isEmpty else { throw MoonshotError.invalidArgument("agent required") }
@@ -320,7 +330,7 @@ public final class MemoryClient: MoonshotHTTPBase, @unchecked Sendable {
             "agent": agent,
             "kind": kind.rawValue,
             "text": text,
-            "tags": tags
+            "tags": tags,
         ]
         _ = try await request(method: "POST", path: "/api/v1/memory", body: body)
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 // MARK: - Connection State
@@ -23,11 +23,11 @@ public protocol StreamlineClientDelegate: AnyObject {
     func client(_ client: StreamlineClient, didEncounterError error: StreamlineError)
 }
 
-// Optional default implementations so delegates can be selective.
+/// Optional default implementations so delegates can be selective.
 public extension StreamlineClientDelegate {
-    func client(_ client: StreamlineClient, didChangeState state: ConnectionState) {}
-    func client(_ client: StreamlineClient, didReceiveMessage message: StreamlineMessage) {}
-    func client(_ client: StreamlineClient, didEncounterError error: StreamlineError) {}
+    func client(_: StreamlineClient, didChangeState _: ConnectionState) {}
+    func client(_: StreamlineClient, didReceiveMessage _: StreamlineMessage) {}
+    func client(_: StreamlineClient, didEncounterError _: StreamlineError) {}
 }
 
 // MARK: - Message Handler
@@ -42,7 +42,6 @@ public typealias MessageHandler = @Sendable (StreamlineMessage) -> Void
 /// The client supports automatic reconnection with exponential backoff and an
 /// offline message queue that buffers produce calls while disconnected.
 public final class StreamlineClient: @unchecked Sendable {
-
     // MARK: - Properties
 
     public let configuration: StreamlineConfiguration
@@ -119,7 +118,7 @@ public final class StreamlineClient: @unchecked Sendable {
         drainOfflineQueue()
     }
 
-    // Client metrics
+    /// Client metrics
     private var _metrics = ClientMetrics()
 
     /// Read-only snapshot of client-side metrics.
@@ -132,7 +131,7 @@ public final class StreamlineClient: @unchecked Sendable {
 
     // Poll buffer for poll-based consumption
     private var pollBuffer: [StreamlineMessage] = []
-    private let pollBufferCapacity = 10_000
+    private let pollBufferCapacity = 10000
 
     // MARK: - Init
 
@@ -142,7 +141,7 @@ public final class StreamlineClient: @unchecked Sendable {
         session: URLSession = .shared
     ) {
         self.configuration = configuration
-        self.producerConfig = configuration.producerConfig
+        producerConfig = configuration.producerConfig
         self.circuitBreaker = circuitBreaker
         self.session = session
     }
@@ -205,7 +204,9 @@ public final class StreamlineClient: @unchecked Sendable {
         }
         let previousState = state
         let isReconnecting = state == .reconnecting
-        if !isReconnecting { state = .connecting }
+        if !isReconnecting {
+            state = .connecting
+        }
         let currentState = state
         // An explicit connect() reopens the lifecycle and invalidates any
         // reconnect Task scheduled by a previous attempt: that Task's
@@ -231,14 +232,14 @@ public final class StreamlineClient: @unchecked Sendable {
         task.sendPing { [weak self, weak task] error in
             guard let self, let task else { return }
             if let error {
-                self.delegate?.client(
+                delegate?.client(
                     self,
                     didEncounterError: .connectionFailed(error.localizedDescription)
                 )
-                self.handleDisconnection(of: task)
+                handleDisconnection(of: task)
                 return
             }
-            self.handleConnectionReady(task)
+            handleConnectionReady(task)
         }
     }
 
@@ -322,7 +323,7 @@ public final class StreamlineClient: @unchecked Sendable {
 
     /// Transactions are unsupported by the current WebSocket wire protocol.
     @available(*, deprecated, message: "Transactions are unsupported and always throw.")
-    public func sendTransactional(topic: String, key: String? = nil, value: Data) throws {
+    public func sendTransactional(topic _: String, key _: String? = nil, value _: Data) throws {
         throw Self.unsupportedTransactionError()
     }
 
@@ -407,15 +408,15 @@ public final class StreamlineClient: @unchecked Sendable {
             guard let self else { return }
 
             if let error {
-                self.circuitBreaker?.recordFailure()
-                self.lock.lock()
-                self._metrics.produceErrors += 1
-                self.lock.unlock()
+                circuitBreaker?.recordFailure()
+                lock.lock()
+                _metrics.produceErrors += 1
+                lock.unlock()
 
-                if attempt < self.producerConfig.retries {
+                if attempt < producerConfig.retries {
                     let delayMs =
-                        self.producerConfig.retryBackoffMs
-                        * Int(pow(2.0, Double(attempt)))
+                        producerConfig.retryBackoffMs
+                            * Int(pow(2.0, Double(attempt)))
                     DispatchQueue.global().asyncAfter(
                         deadline: .now() + .milliseconds(delayMs)
                     ) { [weak self, weak ws] in
@@ -425,13 +426,13 @@ public final class StreamlineClient: @unchecked Sendable {
                             // client disconnected while backing off). Treat
                             // this exactly like exhausted retries: requeue
                             // instead of silently dropping the message.
-                            self.handleExhaustedProduceRetries(
+                            handleExhaustedProduceRetries(
                                 message: message,
                                 sendError: error
                             )
                             return
                         }
-                        self.sendAttempt(
+                        sendAttempt(
                             message: message,
                             payload: payload,
                             ws: ws,
@@ -440,21 +441,21 @@ public final class StreamlineClient: @unchecked Sendable {
                         )
                     }
                 } else {
-                    self.handleExhaustedProduceRetries(message: message, sendError: error)
+                    handleExhaustedProduceRetries(message: message, sendError: error)
                 }
                 return
             }
 
-            self.circuitBreaker?.recordSuccess()
+            circuitBreaker?.recordSuccess()
             let latencyMs = Date().timeIntervalSince(startTime) * 1000
-            self.lock.lock()
-            let count = self._metrics.produceCount
-            let previousAverage = self._metrics.produceAvgLatencyMs
-            self._metrics.produceCount += 1
-            self._metrics.produceBytes += Int64(message.value.count)
-            self._metrics.produceAvgLatencyMs =
+            lock.lock()
+            let count = _metrics.produceCount
+            let previousAverage = _metrics.produceAvgLatencyMs
+            _metrics.produceCount += 1
+            _metrics.produceBytes += Int64(message.value.count)
+            _metrics.produceAvgLatencyMs =
                 (previousAverage * Double(count) + latencyMs) / Double(count + 1)
-            self.lock.unlock()
+            lock.unlock()
         }
     }
 
@@ -752,17 +753,17 @@ public final class StreamlineClient: @unchecked Sendable {
 
     private func listenForMessages(on task: URLSessionWebSocketTask) {
         task.receive { [weak self, weak task] result in
-            guard let self, let task, self.isCurrentWebSocketTask(task) else { return }
+            guard let self, let task, isCurrentWebSocketTask(task) else { return }
             switch result {
-            case .success(let wsMessage):
-                self.handleIncoming(wsMessage)
-                self.listenForMessages(on: task)
-            case .failure(let error):
-                self.delegate?.client(
+            case let .success(wsMessage):
+                handleIncoming(wsMessage)
+                listenForMessages(on: task)
+            case let .failure(error):
+                delegate?.client(
                     self,
                     didEncounterError: .connectionFailed(error.localizedDescription)
                 )
-                self.handleDisconnection(of: task)
+                handleDisconnection(of: task)
             }
         }
     }
@@ -770,9 +771,9 @@ public final class StreamlineClient: @unchecked Sendable {
     func handleIncoming(_ wsMessage: URLSessionWebSocketTask.Message) {
         let data: Data
         switch wsMessage {
-        case .data(let d):
+        case let .data(d):
             data = d
-        case .string(let s):
+        case let .string(s):
             data = Data(s.utf8)
         @unknown default:
             return
@@ -836,11 +837,11 @@ public final class StreamlineClient: @unchecked Sendable {
             // signal and races with disconnect()'s own bookkeeping, so it is
             // not sufficient on its own to prevent resurrecting a connection
             // the caller explicitly closed.
-            let shouldConnect: Bool = self.synchronized {
+            let shouldConnect: Bool = synchronized {
                 !self.isClosed && self.reconnectGeneration == myGeneration
             }
             guard shouldConnect, !Task.isCancelled else { return }
-            self.connect()
+            connect()
         }
 
         let installed: Bool = synchronized {
@@ -856,7 +857,6 @@ public final class StreamlineClient: @unchecked Sendable {
         if !installed {
             newReconnectTask.cancel()
         }
-
     }
 
     // MARK: - Offline Queue
@@ -892,7 +892,9 @@ public final class StreamlineClient: @unchecked Sendable {
                 try produce(topic: message.topic, key: message.key, value: message.value)
             } catch let error as StreamlineError {
                 failedMessages.append(message)
-                if firstFailure == nil { firstFailure = error }
+                if firstFailure == nil {
+                    firstFailure = error
+                }
             } catch {
                 failedMessages.append(message)
                 if firstFailure == nil {
@@ -963,7 +965,7 @@ public final class StreamlineClient: @unchecked Sendable {
         }
         task.send(.data(data)) { [weak self] error in
             guard let self, let error else { return }
-            self.delegate?.client(
+            delegate?.client(
                 self,
                 didEncounterError: .connectionFailed(error.localizedDescription)
             )
@@ -999,7 +1001,9 @@ public final class StreamlineClient: @unchecked Sendable {
 
     private func encodeMessage(_ message: StreamlineMessage) -> Data {
         var dict: [String: Any] = ["topic": message.topic, "value": message.value.base64EncodedString()]
-        if let key = message.key { dict["key"] = key }
+        if let key = message.key {
+            dict["key"] = key
+        }
         return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
     }
 
@@ -1030,20 +1034,23 @@ public final class StreamlineClient: @unchecked Sendable {
     }
 }
 
-
-
 /// Internal buffer for accumulating records before batch send.
-internal struct BatchBuffer<T> {
+struct BatchBuffer<T> {
     private var items: [T] = []
     private let capacity: Int
 
     init(capacity: Int = 1000) {
         self.capacity = capacity
-        self.items.reserveCapacity(capacity)
+        items.reserveCapacity(capacity)
     }
 
-    var isFull: Bool { items.count >= capacity }
-    var count: Int { items.count }
+    var isFull: Bool {
+        items.count >= capacity
+    }
+
+    var count: Int {
+        items.count
+    }
 
     mutating func append(_ item: T) -> Bool {
         items.append(item)

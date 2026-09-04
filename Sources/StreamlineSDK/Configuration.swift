@@ -113,7 +113,7 @@ enum ConfigValidator {
                     "custom CA, mutual TLS, and insecure TLS options are unsupported"
                 )
             }
-            if tls.enabled && scheme != "wss" {
+            if tls.enabled, scheme != "wss" {
                 throw StreamlineError.configurationError(
                     "TLS requires a wss:// server URL"
                 )

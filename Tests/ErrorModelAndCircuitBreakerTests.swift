@@ -1,10 +1,9 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 // MARK: - ErrorCode Tests
 
 final class ErrorCodeTests: XCTestCase {
-
     func testAllErrorCodesExist() {
         let codes: [ErrorCode] = [
             .connection, .timeout, .authentication, .authorization,
@@ -32,7 +31,6 @@ final class ErrorCodeTests: XCTestCase {
 // MARK: - StreamlineError ErrorCode Mapping
 
 final class ErrorCodeMappingTests: XCTestCase {
-
     func testNotConnectedMapsToConnection() {
         XCTAssertEqual(StreamlineError.notConnected.errorCode, .connection)
     }
@@ -107,7 +105,6 @@ final class ErrorCodeMappingTests: XCTestCase {
 // MARK: - isRetryable Tests
 
 final class ErrorRetryableTests: XCTestCase {
-
     func testConnectionErrorsAreRetryable() {
         XCTAssertTrue(StreamlineError.notConnected.isRetryable)
         XCTAssertTrue(StreamlineError.connectionFailed("refused").isRetryable)
@@ -169,7 +166,6 @@ final class ErrorRetryableTests: XCTestCase {
 // MARK: - Error Hint Tests
 
 final class ErrorHintTests: XCTestCase {
-
     func testNotConnectedHint() {
         let hint = StreamlineError.notConnected.hint
         XCTAssertTrue(hint.contains("connect()"))
@@ -266,7 +262,6 @@ final class ErrorHintTests: XCTestCase {
 // MARK: - New Error Cases
 
 final class NewErrorCaseTests: XCTestCase {
-
     func testPartitionNotFoundEquality() {
         XCTAssertEqual(StreamlineError.partitionNotFound("x"), StreamlineError.partitionNotFound("x"))
         XCTAssertNotEqual(StreamlineError.partitionNotFound("x"), StreamlineError.partitionNotFound("y"))
@@ -309,7 +304,6 @@ final class NewErrorCaseTests: XCTestCase {
 // MARK: - Consumer Offset Management Tests
 
 final class OffsetManagementTests: XCTestCase {
-
     private func makeClient() -> StreamlineClient {
         let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
         return StreamlineClient(configuration: config)
@@ -397,7 +391,6 @@ final class OffsetManagementTests: XCTestCase {
 // MARK: - CircuitBreaker Tests
 
 final class CircuitBreakerTests: XCTestCase {
-
     // MARK: - Configuration
 
     func testDefaultConfig() {
@@ -453,16 +446,16 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertNoThrow(try cb.check())
     }
 
-    func testCheckIncrementsRequestCount() {
+    func testCheckIncrementsRequestCount() throws {
         let cb = CircuitBreaker()
-        try! cb.check()
-        try! cb.check()
+        try cb.check()
+        try cb.check()
         XCTAssertEqual(cb.counts().requests, 2)
     }
 
-    func testRecordSuccessIncrementsCounts() {
+    func testRecordSuccessIncrementsCounts() throws {
         let cb = CircuitBreaker()
-        try! cb.check()
+        try cb.check()
         cb.recordSuccess()
         let c = cb.counts()
         XCTAssertEqual(c.consecutiveSuccesses, 1)
@@ -470,9 +463,9 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertEqual(c.consecutiveFailures, 0)
     }
 
-    func testRecordFailureIncrementsCounts() {
+    func testRecordFailureIncrementsCounts() throws {
         let cb = CircuitBreaker()
-        try! cb.check()
+        try cb.check()
         cb.recordFailure()
         let c = cb.counts()
         XCTAssertEqual(c.consecutiveFailures, 1)
@@ -648,7 +641,7 @@ final class CircuitBreakerTests: XCTestCase {
         let cb = CircuitBreaker(config: CircuitBreakerConfig(failureThreshold: 100))
         let group = DispatchGroup()
 
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             group.enter()
             DispatchQueue.global().async {
                 try? cb.check()

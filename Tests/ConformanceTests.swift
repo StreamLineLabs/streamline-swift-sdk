@@ -1,5 +1,5 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 // SDK Conformance Test Suite — 46 tests per SDK_CONFORMANCE_SPEC.md
 //
@@ -9,7 +9,6 @@ import XCTest
 // MARK: - Producer (8 tests)
 
 final class ProducerConformanceTests: XCTestCase {
-
     func testP01_SimpleProduce() {
         let msg = StreamlineMessage(topic: "events", stringValue: "{\"action\":\"click\"}")
         XCTAssertEqual(msg.topic, "events")
@@ -61,8 +60,8 @@ final class ProducerConformanceTests: XCTestCase {
         XCTAssertThrowsError(try config.validate())
     }
 
-    func testP08_Timeout() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!, timeout: 5)
+    func testP08_Timeout() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")), timeout: 5)
         XCTAssertEqual(config.timeout, 5)
     }
 }
@@ -70,9 +69,8 @@ final class ProducerConformanceTests: XCTestCase {
 // MARK: - Consumer (8 tests)
 
 final class ConsumerConformanceTests: XCTestCase {
-
-    func testC01_Subscribe() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testC01_Subscribe() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         XCTAssertTrue(config.autoReconnect)
         XCTAssertEqual(config.maxRetries, 10)
     }
@@ -93,9 +91,9 @@ final class ConsumerConformanceTests: XCTestCase {
         XCTAssertEqual(msg.timestamp, ts)
     }
 
-    func testC05_Follow() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!, autoReconnect: true, maxRetries: 5
+    func testC05_Follow() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")), autoReconnect: true, maxRetries: 5
         )
         XCTAssertTrue(config.autoReconnect)
         XCTAssertEqual(config.maxRetries, 5)
@@ -132,7 +130,6 @@ final class ConsumerConformanceTests: XCTestCase {
 // MARK: - Consumer Groups (8 tests)
 
 final class ConsumerGroupConformanceTests: XCTestCase {
-
     func testG01_JoinGroup() {
         let config = ConsumerConfig(groupId: "my-group")
         XCTAssertEqual(config.groupId, "my-group")
@@ -200,7 +197,6 @@ final class ConsumerGroupConformanceTests: XCTestCase {
 // MARK: - Admin / Topics (6 tests)
 
 final class AdminConformanceTests: XCTestCase {
-
     func testD01_CreateTopic() {
         let topic = TopicInfo(name: "events", partitions: 3, replicationFactor: 1, messageCount: 0)
         XCTAssertEqual(topic.name, "events")
@@ -248,7 +244,7 @@ final class AdminConformanceTests: XCTestCase {
 
     func testD06_DuplicateTopicRejected() {
         let error = StreamlineError.adminOperationFailed("Topic already exists")
-        if case .adminOperationFailed(let msg) = error {
+        if case let .adminOperationFailed(msg) = error {
             XCTAssertTrue(msg.contains("already exists"))
         } else {
             XCTFail("Expected adminOperationFailed")
@@ -259,19 +255,18 @@ final class AdminConformanceTests: XCTestCase {
 // MARK: - Authentication (6 tests)
 
 final class AuthConformanceTests: XCTestCase {
-
-    func testA01_TLSConnect() {
+    func testA01_TLSConnect() throws {
         let tls = TlsConfig(enabled: true, caCertificatePath: "/etc/ssl/ca.pem")
         XCTAssertTrue(tls.enabled)
         XCTAssertEqual(tls.caCertificatePath, "/etc/ssl/ca.pem")
-        let config = StreamlineConfiguration(
-            url: URL(string: "wss://localhost:9092")!,
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "wss://localhost:9092")),
             tls: tls
         )
         XCTAssertThrowsError(try config.validate())
     }
 
-    func testA02_MutualTLS() {
+    func testA02_MutualTLS() throws {
         let tls = TlsConfig(
             enabled: true,
             caCertificatePath: "/etc/ssl/ca.pem",
@@ -280,19 +275,19 @@ final class AuthConformanceTests: XCTestCase {
         )
         XCTAssertEqual(tls.clientCertificatePath, "/etc/ssl/client.pem")
         XCTAssertEqual(tls.clientKeyPath, "/etc/ssl/client.key")
-        let config = StreamlineConfiguration(
-            url: URL(string: "wss://localhost:9092")!,
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "wss://localhost:9092")),
             tls: tls
         )
         XCTAssertThrowsError(try config.validate())
     }
 
-    func testA03_SASLPlain() {
+    func testA03_SASLPlain() throws {
         let sasl = SaslConfig(mechanism: .plain, username: "admin", password: "secret")
         XCTAssertEqual(sasl.mechanism, .plain)
         XCTAssertEqual(sasl.username, "admin")
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
             sasl: sasl
         )
         XCTAssertThrowsError(try config.validate())
@@ -312,7 +307,7 @@ final class AuthConformanceTests: XCTestCase {
 
     func testA06_AuthFailure() {
         let error = StreamlineError.authenticationFailed("Invalid credentials")
-        if case .authenticationFailed(let msg) = error {
+        if case let .authenticationFailed(msg) = error {
             XCTAssertTrue(msg.contains("Invalid"))
         } else {
             XCTFail("Expected authenticationFailed")
@@ -323,7 +318,6 @@ final class AuthConformanceTests: XCTestCase {
 // MARK: - Schema Registry (6 tests)
 
 final class SchemaConformanceTests: XCTestCase {
-
     func testS01_RegisterSchema() {
         let schema = SchemaInfo(
             id: 1, subject: "events-value", version: 1, format: .avro,
@@ -377,10 +371,9 @@ final class SchemaConformanceTests: XCTestCase {
 // MARK: - Error Handling (5 tests)
 
 final class ErrorConformanceTests: XCTestCase {
-
     func testE01_UnknownTopic() {
         let error = StreamlineError.topicNotFound("nonexistent")
-        if case .topicNotFound(let name) = error {
+        if case let .topicNotFound(name) = error {
             XCTAssertEqual(name, "nonexistent")
         } else {
             XCTFail("Expected topicNotFound")
@@ -389,7 +382,7 @@ final class ErrorConformanceTests: XCTestCase {
 
     func testE02_InvalidPartition() {
         let error = StreamlineError.adminOperationFailed("Invalid partition: -1")
-        if case .adminOperationFailed(let msg) = error {
+        if case let .adminOperationFailed(msg) = error {
             XCTAssertTrue(msg.contains("-1"))
         } else {
             XCTFail("Expected adminOperationFailed")
@@ -423,7 +416,7 @@ final class ErrorConformanceTests: XCTestCase {
 
     func testE05_DescriptiveErrorMessages() {
         let error = StreamlineError.serializationError("Invalid JSON at position 42")
-        if case .serializationError(let msg) = error {
+        if case let .serializationError(msg) = error {
             XCTAssertTrue(msg.contains("position 42"))
         } else {
             XCTFail("Expected serializationError")
@@ -434,23 +427,22 @@ final class ErrorConformanceTests: XCTestCase {
 // MARK: - Performance (4 tests)
 
 final class PerformanceConformanceTests: XCTestCase {
-
     func testF01_Throughput1KB() {
         let value = String(repeating: "x", count: 1024)
         let start = Date().timeIntervalSinceReferenceDate
-        for i in 0..<10_000 {
+        for i in 0 ..< 10000 {
             _ = StreamlineMessage(topic: "perf", key: "k-\(i)", stringValue: value)
         }
         let elapsed = Date().timeIntervalSinceReferenceDate - start
         XCTAssertLessThan(elapsed, 10.0, "10k message creations took \(elapsed)s, expected < 10s")
     }
 
-    func testF02_LatencyP99() {
+    func testF02_LatencyP99() throws {
         var times: [Double] = []
-        for _ in 0..<1000 {
+        for _ in 0 ..< 1000 {
             let start = Date().timeIntervalSinceReferenceDate
-            _ = StreamlineConfiguration(
-                url: URL(string: "ws://localhost:9092")!, autoReconnect: true, maxRetries: 10,
+            _ = try StreamlineConfiguration(
+                url: XCTUnwrap(URL(string: "ws://localhost:9092")), autoReconnect: true, maxRetries: 10,
                 tls: TlsConfig(enabled: true),
                 sasl: SaslConfig(mechanism: .scramSha256, username: "u", password: "p")
             )
@@ -461,19 +453,19 @@ final class PerformanceConformanceTests: XCTestCase {
         XCTAssertLessThan(p99, 0.001, "P99 config creation: \(p99 * 1000)ms")
     }
 
-    func testF03_StartupTime() {
+    func testF03_StartupTime() throws {
         let start = Date().timeIntervalSinceReferenceDate
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         _ = StreamlineClient(configuration: config)
         let elapsed = Date().timeIntervalSinceReferenceDate - start
         XCTAssertLessThan(elapsed, 1.0, "Client instantiation took \(elapsed)s, expected < 1s")
     }
 
     func testF04_MemoryUsage() {
-        let messages = (1...10_000).map {
+        let messages = (1 ... 10000).map {
             StreamlineMessage(topic: "perf", key: "key-\($0)", stringValue: "value-\($0)")
         }
-        XCTAssertEqual(messages.count, 10_000)
+        XCTAssertEqual(messages.count, 10000)
         XCTAssertEqual(messages.first?.key, "key-1")
         XCTAssertEqual(messages.last?.key, "key-10000")
     }

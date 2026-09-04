@@ -1,8 +1,7 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 final class TelemetryTests: XCTestCase {
-
     // MARK: - TelemetrySpan
 
     func testSpanSetAttribute() {
@@ -132,15 +131,15 @@ final class TelemetryTests: XCTestCase {
 
     // MARK: - TracedClient
 
-    func testTracedClientState() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testTracedClientState() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         let traced = TracedClient(client: client, telemetry: NoOpTelemetry())
         XCTAssertEqual(traced.state, .disconnected)
     }
 
-    func testTracedClientTransactionsFailClosed() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testTracedClientTransactionsFailClosed() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         let traced = TracedClient(client: client, telemetry: ConsoleTelemetry())
         XCTAssertThrowsError(try traced.beginTransaction())
@@ -148,13 +147,13 @@ final class TelemetryTests: XCTestCase {
         XCTAssertThrowsError(try traced.abortTransaction())
     }
 
-    func testTracedClientBeginTransactionReportsUnsupported() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testTracedClientBeginTransactionReportsUnsupported() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         let traced = TracedClient(client: client, telemetry: NoOpTelemetry())
         XCTAssertThrowsError(try traced.beginTransaction()) { error in
             guard let streamlineError = error as? StreamlineError,
-                  case .transaction(let message) = streamlineError
+                  case let .transaction(message) = streamlineError
             else {
                 return XCTFail("Expected transaction error")
             }
@@ -164,9 +163,9 @@ final class TelemetryTests: XCTestCase {
 
     // MARK: - TracedAdminClient
 
-    func testTracedAdminClientCreation() {
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!)
-        let _ = TracedAdminClient(admin: admin, telemetry: NoOpTelemetry())
+    func testTracedAdminClientCreation() throws {
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")))
+        _ = TracedAdminClient(admin: admin, telemetry: NoOpTelemetry())
     }
 
     // MARK: - Thread Safety
@@ -176,7 +175,7 @@ final class TelemetryTests: XCTestCase {
         let expectation = XCTestExpectation(description: "Concurrent access completes")
         expectation.expectedFulfillmentCount = 100
 
-        for i in 0..<100 {
+        for i in 0 ..< 100 {
             DispatchQueue.global().async {
                 span.setAttribute("key-\(i)", value: "val-\(i)")
                 _ = span.attributes
