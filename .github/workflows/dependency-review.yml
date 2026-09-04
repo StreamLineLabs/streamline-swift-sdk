@@ -9,6 +9,11 @@ permissions:
 
 jobs:
   dependency-review:
+    # Dependency Review requires the repository dependency graph. Set the
+    # ENABLE_DEPENDENCY_REVIEW repository variable to "true" after enabling
+    # that feature; until then this check is neutrally skipped instead of
+    # failing package validation for an unavailable repository capability.
+    if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

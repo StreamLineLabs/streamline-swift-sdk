@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  SWIFTFORMAT_VERSION: '0.63.0'
+  SWIFTFORMAT_SHA256: 28c7802e11fa5ae113d903066439c6bb1be20a8ac1ad9709c42616a7e273fb0f
+
 jobs:
   check:
     strategy:
@@ -68,13 +72,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check formatting
+      - name: Install pinned SwiftFormat
         run: |
-          if command -v swiftformat &> /dev/null; then
-            swiftformat --lint Sources/ Tests/ examples/
-          else
-            echo "swiftformat is not configured on this runner"
-          fi
+          mkdir -p .build/swiftformat
+          curl --fail --location --retry 3 \
+            "https://github.com/nicklockwood/SwiftFormat/releases/download/${SWIFTFORMAT_VERSION}/swiftformat.zip" \
+            --output .build/swiftformat.zip
+          echo "${SWIFTFORMAT_SHA256}  .build/swiftformat.zip" | shasum -a 256 --check
+          unzip -q .build/swiftformat.zip -d .build/swiftformat
+          test "$(.build/swiftformat/swiftformat --version)" = "${SWIFTFORMAT_VERSION}"
+
+      - name: Check formatting
+        run: .build/swiftformat/swiftformat --lint Sources/ Tests/ examples/ --reporter github-actions-log
 
   integration-test:
     runs-on: ubuntu-latest
