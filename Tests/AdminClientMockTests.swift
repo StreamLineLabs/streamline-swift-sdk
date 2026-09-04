@@ -27,7 +27,15 @@ final class MockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        MockURLProtocol.capturedRequests.append(request)
+        let handledRequest: URLRequest
+        do {
+            handledRequest = try Self.materializingBody(in: request)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        MockURLProtocol.capturedRequests.append(handledRequest)
 
         guard let handler = MockURLProtocol.requestHandler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
@@ -35,7 +43,7 @@ final class MockURLProtocol: URLProtocol {
         }
 
         do {
-            let (response, data) = try handler(request)
+            let (response, data) = try handler(handledRequest)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
@@ -49,6 +57,34 @@ final class MockURLProtocol: URLProtocol {
     static func reset() {
         requestHandler = nil
         capturedRequests = []
+    }
+
+    private static func materializingBody(in originalRequest: URLRequest) throws -> URLRequest {
+        var request = originalRequest
+        guard request.httpBody == nil, let stream = request.httpBodyStream else {
+            return request
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+        defer { buffer.deallocate() }
+
+        var body = Data()
+        while true {
+            let count = stream.read(buffer, maxLength: 4096)
+            if count < 0 {
+                throw stream.streamError ?? URLError(.cannotDecodeContentData)
+            }
+            if count == 0 {
+                break
+            }
+            body.append(buffer, count: count)
+        }
+
+        request.httpBody = body
+        return request
     }
 }
 
@@ -452,9 +488,12 @@ final class AdminClientQueryTests: XCTestCase {
     func testQueryReturnsResults() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/query"))
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.absoluteString.contains("/v1/query"))
 
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            let bodyData = try XCTUnwrap(request.httpBody)
+            let jsonObject = try JSONSerialization.jsonObject(with: bodyData)
+            let body = try XCTUnwrap(jsonObject as? [String: Any])
             XCTAssertEqual(body["query"] as? String, "SELECT * FROM events LIMIT 5")
 
             return jsonResponse(200, json: [
