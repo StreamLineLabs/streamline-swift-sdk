@@ -12,31 +12,44 @@ on:
 jobs:
   integration:
     runs-on: ubuntu-latest
-    services:
-      streamline:
-        image: ghcr.io/streamlinelabs/streamline:latest
-        ports:
-          - 9092:9092
-          - 9094:9094
-        options: >-
-          --health-cmd "curl -f http://localhost:9094/health || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          swift-version: '5.9'
+          persist-credentials: false
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
+        with:
+          # Aligned with ci.yml/codeql.yml/release.yml — see the
+          # swift-crypto dependency comment in Package.swift for why 6.1 is
+          # the minimum on Linux (a swift-corelibs-foundation
+          # URLSession/WebSocket completeness floor, independent of the
+          # dependency, plus the minimum needed to parse the pinned
+          # swift-crypto manifest).
+          swift-version: '6.1'
+      - name: Verify pinned integration fixture
+        run: |
+          docker manifest inspect ghcr.io/streamlinelabs/streamline:0.4.0 || {
+            echo "::error::Pinned Streamline 0.4.0 integration image is unavailable or requires credentials"
+            exit 1
+          }
+      - name: Start Streamline
+        run: docker compose -f docker-compose.test.yml up -d
       - name: Wait for Streamline
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://localhost:9094/health && break
+            if curl -sf http://localhost:9094/health; then
+              echo "Streamline is ready"
+              exit 0
+            fi
             echo "Waiting for Streamline... ($i/30)"
             sleep 2
           done
+          echo "Streamline failed to become healthy"
+          exit 1
       - name: Run integration tests
-        run: swift test --filter Integration || swift test
+        run: swift test --filter IntegrationTests
         env:
-          STREAMLINE_BOOTSTRAP_SERVERS: localhost:9092
           STREAMLINE_HTTP_URL: http://localhost:9094
+          STREAMLINE_WEBSOCKET_URL: ws://localhost:9092
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v

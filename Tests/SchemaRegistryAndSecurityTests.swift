@@ -1,8 +1,7 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 final class SchemaRegistryTests: XCTestCase {
-
     // MARK: - SchemaInfo Model
 
     func testSchemaInfoCreation() {
@@ -46,14 +45,14 @@ final class SchemaRegistryTests: XCTestCase {
 
     // MARK: - SchemaRegistryClient Init
 
-    func testClientCreation() {
-        let client = SchemaRegistryClient(baseURL: URL(string: "http://localhost:9094")!)
+    func testClientCreation() throws {
+        let client = try SchemaRegistryClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")))
         XCTAssertNotNil(client)
     }
 
-    func testClientWithAuth() {
-        let client = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+    func testClientWithAuth() throws {
+        let client = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             authToken: "my-token"
         )
         XCTAssertNotNil(client)
@@ -63,7 +62,7 @@ final class SchemaRegistryTests: XCTestCase {
 
     func testSchemaRegistryError() {
         let error = StreamlineError.schemaRegistryError("Subject not found")
-        if case .schemaRegistryError(let message) = error {
+        if case let .schemaRegistryError(message) = error {
             XCTAssertTrue(message.contains("Subject"))
         } else {
             XCTFail("Expected schemaRegistryError")
@@ -85,7 +84,6 @@ final class SchemaRegistryTests: XCTestCase {
 // MARK: - Security Tests
 
 final class SecurityTests: XCTestCase {
-
     func testTlsConfigDefaults() {
         let config = TlsConfig()
         XCTAssertFalse(config.enabled)
@@ -140,8 +138,7 @@ final class SecurityTests: XCTestCase {
 
 // MARK: - Telemetry Tests
 
-final class TelemetryTests: XCTestCase {
-
+final class SchemaRegistryAndSecurityTelemetryTests: XCTestCase {
     func testNoOpTelemetryCreatesSpan() {
         let telemetry = NoOpTelemetry()
         let span = telemetry.startSpan(topic: "orders", operation: "produce")
@@ -157,7 +154,7 @@ final class TelemetryTests: XCTestCase {
         telemetry.endSpan(span)
     }
 
-    func testSpanElapsed() throws {
+    func testSpanElapsed() {
         let span = TelemetrySpan(name: "test", topic: "t", operation: "op")
         Thread.sleep(forTimeInterval: 0.01)
         XCTAssertGreaterThan(span.elapsed, 0)
@@ -193,7 +190,6 @@ final class TelemetryTests: XCTestCase {
 // MARK: - ProducerConsumerConfig Tests
 
 final class ProducerConsumerConfigTests: XCTestCase {
-
     func testProducerConfigDefaults() {
         let config = ProducerConfig()
         XCTAssertEqual(config.batchSize, 16384)
@@ -202,7 +198,7 @@ final class ProducerConsumerConfigTests: XCTestCase {
         XCTAssertEqual(config.retries, 3)
         XCTAssertEqual(config.retryBackoffMs, 100)
         XCTAssertFalse(config.idempotent)
-        XCTAssertEqual(config.acks, .one)
+        XCTAssertEqual(config.acks, .none)
     }
 
     func testProducerConfigCustom() {
@@ -230,12 +226,16 @@ final class ProducerConsumerConfigTests: XCTestCase {
     func testConsumerConfigDefaults() {
         let config = ConsumerConfig()
         XCTAssertNil(config.groupId)
-        XCTAssertTrue(config.autoCommit)
+        // autoCommit defaults to false: the WebSocket transport has no
+        // verified commit-acknowledgement contract, so the neutral
+        // standalone-consumer default must be the one shape that validates.
+        XCTAssertFalse(config.autoCommit)
         XCTAssertEqual(config.autoCommitIntervalMs, 5000)
         XCTAssertEqual(config.sessionTimeoutMs, 30000)
         XCTAssertEqual(config.heartbeatIntervalMs, 3000)
         XCTAssertEqual(config.maxPollRecords, 500)
         XCTAssertEqual(config.autoOffsetReset, .latest)
+        XCTAssertNoThrow(try config.validate())
     }
 
     func testConsumerConfigCustom() {
@@ -258,6 +258,86 @@ final class ProducerConsumerConfigTests: XCTestCase {
         XCTAssertEqual(ConsumerConfig(), ConsumerConfig())
     }
 
+    func testConsumerConfigValidateRejectsGroupId() {
+        let config = ConsumerConfig(groupId: "my-group")
+        XCTAssertThrowsError(try config.validate()) { error in
+            guard case let .configurationError(reason) = error as? StreamlineError else {
+                return XCTFail("Expected configurationError, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("groupId"))
+        }
+    }
+
+    func testConsumerConfigValidateRejectsAutoCommit() {
+        let config = ConsumerConfig(autoCommit: true)
+        XCTAssertThrowsError(try config.validate()) { error in
+            guard case let .configurationError(reason) = error as? StreamlineError else {
+                return XCTFail("Expected configurationError, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("autoCommit"))
+        }
+    }
+
+    func testConsumerConfigValidateRejectsNonDefaultSessionTimeout() {
+        let config = ConsumerConfig(sessionTimeoutMs: 60000)
+        XCTAssertThrowsError(try config.validate()) { error in
+            guard case let .configurationError(reason) = error as? StreamlineError else {
+                return XCTFail("Expected configurationError, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("sessionTimeoutMs"))
+        }
+    }
+
+    func testConsumerConfigValidateRejectsNonDefaultHeartbeatInterval() {
+        let config = ConsumerConfig(heartbeatIntervalMs: 5000)
+        XCTAssertThrowsError(try config.validate()) { error in
+            guard case let .configurationError(reason) = error as? StreamlineError else {
+                return XCTFail("Expected configurationError, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("heartbeatIntervalMs"))
+        }
+    }
+
+    func testConsumerConfigValidateRejectsNonDefaultMaxPollRecords() {
+        let config = ConsumerConfig(maxPollRecords: 1000)
+        XCTAssertThrowsError(try config.validate()) { error in
+            guard case let .configurationError(reason) = error as? StreamlineError else {
+                return XCTFail("Expected configurationError, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("maxPollRecords"))
+        }
+    }
+
+    func testConsumerConfigValidateRejectsNonLatestOffsetReset() {
+        for reset: OffsetReset in [.earliest, .none] {
+            let config = ConsumerConfig(autoOffsetReset: reset)
+            XCTAssertThrowsError(try config.validate()) { error in
+                guard case let .configurationError(reason) = error as? StreamlineError else {
+                    return XCTFail("Expected configurationError, got \(error)")
+                }
+                XCTAssertTrue(reason.contains("autoOffsetReset"))
+            }
+        }
+    }
+
+    func testConsumerConfigValidateRejectsNegativeAutoCommitInterval() {
+        let config = ConsumerConfig(autoCommitIntervalMs: -1)
+        XCTAssertThrowsError(try config.validate())
+    }
+
+    func testConsumerConfigValidateRejectsNonDefaultAutoCommitInterval() {
+        let config = ConsumerConfig(autoCommitIntervalMs: 1000)
+        XCTAssertThrowsError(try config.validate())
+    }
+
+    func testStreamlineConfigurationValidateRejectsUnsupportedConsumerConfig() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
+            consumerConfig: ConsumerConfig(groupId: "my-group")
+        )
+        XCTAssertThrowsError(try config.validate())
+    }
+
     func testCompressionTypes() {
         let types: [CompressionType] = [.none, .gzip, .snappy, .lz4, .zstd]
         XCTAssertEqual(types.count, 5)
@@ -270,6 +350,30 @@ final class ProducerConsumerConfigTests: XCTestCase {
         XCTAssertEqual(Acks.all.rawValue, -1)
     }
 
+    func testUnsupportedCompressionFailsValidation() {
+        XCTAssertThrowsError(try ProducerConfig(compression: .gzip).validate())
+    }
+
+    func testUnsupportedIdempotenceFailsValidation() {
+        XCTAssertThrowsError(try ProducerConfig(idempotent: true).validate())
+    }
+
+    func testUnsupportedBrokerAcknowledgmentsFailValidation() {
+        XCTAssertThrowsError(try ProducerConfig(acks: .one).validate())
+        XCTAssertThrowsError(try ProducerConfig(acks: .all).validate())
+    }
+
+    func testClientSideBufferingConfigurationIsSupported() {
+        XCTAssertNoThrow(
+            try ProducerConfig(
+                batchSize: 32768,
+                lingerMs: 10,
+                compression: .none,
+                acks: .none
+            ).validate()
+        )
+    }
+
     func testOffsetResetValues() {
         XCTAssertEqual(OffsetReset.earliest.rawValue, "earliest")
         XCTAssertEqual(OffsetReset.latest.rawValue, "latest")
@@ -280,45 +384,47 @@ final class ProducerConsumerConfigTests: XCTestCase {
 // MARK: - Configuration with New Fields
 
 final class ConfigurationExtendedTests: XCTestCase {
-
-    func testConfigurationWithTls() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "wss://localhost:9092")!,
+    func testConfigurationWithTls() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "wss://localhost:9092")),
             tls: TlsConfig(enabled: true)
         )
         XCTAssertNotNil(config.tls)
-        XCTAssertTrue(config.tls!.enabled)
+        XCTAssertTrue(try XCTUnwrap(config.tls?.enabled))
+        XCTAssertNoThrow(try config.validate())
     }
 
-    func testConfigurationWithSasl() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+    func testConfigurationWithSasl() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
             sasl: SaslConfig(username: "admin", password: "secret")
         )
         XCTAssertNotNil(config.sasl)
-        XCTAssertEqual(config.sasl!.username, "admin")
+        XCTAssertEqual(config.sasl?.username, "admin")
+        XCTAssertThrowsError(try config.validate())
     }
 
-    func testConfigurationDefaultsPreserved() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testConfigurationDefaultsPreserved() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         XCTAssertNil(config.tls)
         XCTAssertNil(config.sasl)
         XCTAssertTrue(config.autoReconnect)
         XCTAssertEqual(config.maxRetries, 10)
     }
 
-    func testConfigurationWithProducerConfig() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+    func testConfigurationWithProducerConfig() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
             producerConfig: ProducerConfig(batchSize: 32768, compression: .lz4)
         )
         XCTAssertEqual(config.producerConfig.batchSize, 32768)
         XCTAssertEqual(config.producerConfig.compression, .lz4)
+        XCTAssertThrowsError(try config.validate())
     }
 
-    func testConfigurationWithConsumerConfig() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+    func testConfigurationWithConsumerConfig() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
             consumerConfig: ConsumerConfig(groupId: "my-app", autoCommit: false)
         )
         XCTAssertEqual(config.consumerConfig.groupId, "my-app")

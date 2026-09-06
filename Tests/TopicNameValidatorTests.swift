@@ -1,8 +1,7 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 final class TopicNameValidatorTests: XCTestCase {
-
     // MARK: - Valid Names
 
     func testValidSimpleName() throws {
@@ -42,7 +41,7 @@ final class TopicNameValidatorTests: XCTestCase {
 
     func testEmptyNameThrows() {
         XCTAssertThrowsError(try TopicNameValidator.validate("")) { error in
-            guard case StreamlineError.configurationError(let msg) = error else {
+            guard case let StreamlineError.configurationError(msg) = error else {
                 return XCTFail("Expected configurationError, got \(error)")
             }
             XCTAssertTrue(msg.contains("empty"))
@@ -54,7 +53,7 @@ final class TopicNameValidatorTests: XCTestCase {
     func testExceedsMaxLengthThrows() {
         let name = String(repeating: "a", count: TopicNameValidator.maxLength + 1)
         XCTAssertThrowsError(try TopicNameValidator.validate(name)) { error in
-            guard case StreamlineError.configurationError(let msg) = error else {
+            guard case let StreamlineError.configurationError(msg) = error else {
                 return XCTFail("Expected configurationError, got \(error)")
             }
             XCTAssertTrue(msg.contains("max length"))
@@ -65,7 +64,7 @@ final class TopicNameValidatorTests: XCTestCase {
 
     func testDotNameThrows() {
         XCTAssertThrowsError(try TopicNameValidator.validate(".")) { error in
-            guard case StreamlineError.configurationError(let msg) = error else {
+            guard case let StreamlineError.configurationError(msg) = error else {
                 return XCTFail("Expected configurationError, got \(error)")
             }
             XCTAssertTrue(msg.contains("'.' or '..'"))
@@ -74,7 +73,7 @@ final class TopicNameValidatorTests: XCTestCase {
 
     func testDoubleDotNameThrows() {
         XCTAssertThrowsError(try TopicNameValidator.validate("..")) { error in
-            guard case StreamlineError.configurationError(let msg) = error else {
+            guard case let StreamlineError.configurationError(msg) = error else {
                 return XCTFail("Expected configurationError, got \(error)")
             }
             XCTAssertTrue(msg.contains("'.' or '..'"))
@@ -89,7 +88,7 @@ final class TopicNameValidatorTests: XCTestCase {
 
     func testSpaceThrows() {
         XCTAssertThrowsError(try TopicNameValidator.validate("my topic")) { error in
-            guard case StreamlineError.configurationError(let msg) = error else {
+            guard case let StreamlineError.configurationError(msg) = error else {
                 return XCTFail("Expected configurationError, got \(error)")
             }
             XCTAssertTrue(msg.contains("invalid characters"))

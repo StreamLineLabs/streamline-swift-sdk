@@ -1,23 +1,26 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 // MARK: - ConfigValidator Tests
 
 final class ConfigValidatorTests: XCTestCase {
-
     func testValidConfigPasses() throws {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!, timeout: 10)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")), timeout: 10)
         XCTAssertNoThrow(try ConfigValidator.validate(config))
     }
 
-    func testZeroTimeoutFails() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!, timeout: 0)
+    func testZeroTimeoutFails() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")), timeout: 0)
         XCTAssertThrowsError(try ConfigValidator.validate(config)) { error in
             guard let streamlineError = error as? StreamlineError else {
                 return XCTFail("Expected StreamlineError, got \(error)")
             }
             XCTAssertEqual(streamlineError.errorCode, .configuration)
-            if case .configurationError(let detail) = streamlineError {
+            if case let .configurationError(detail) = streamlineError {
                 XCTAssertTrue(detail.contains("timeout"))
             } else {
                 XCTFail("Expected configurationError")
@@ -25,8 +28,8 @@ final class ConfigValidatorTests: XCTestCase {
         }
     }
 
-    func testNegativeTimeoutFails() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!, timeout: -5)
+    func testNegativeTimeoutFails() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")), timeout: -5)
         XCTAssertThrowsError(try ConfigValidator.validate(config)) { error in
             guard let streamlineError = error as? StreamlineError else {
                 return XCTFail("Expected StreamlineError")
@@ -34,12 +37,47 @@ final class ConfigValidatorTests: XCTestCase {
             XCTAssertEqual(streamlineError.errorCode, .configuration)
         }
     }
+
+    func testTlsRequiresSecureWebSocketURL() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
+            tls: TlsConfig(enabled: true)
+        )
+        XCTAssertThrowsError(try config.validate())
+    }
+
+    func testCustomTlsMaterialFailsValidation() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "wss://localhost:9092")),
+            tls: TlsConfig(enabled: true, caCertificatePath: "/certs/ca.pem")
+        )
+        XCTAssertThrowsError(try config.validate())
+    }
+
+    func testSaslFailsValidation() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "wss://localhost:9092")),
+            sasl: SaslConfig(username: "user", password: "password")
+        )
+        XCTAssertThrowsError(try config.validate())
+    }
+
+    func testUnsupportedProducerGuaranteesFailAtConnectBoundary() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
+            producerConfig: ProducerConfig(idempotent: true)
+        )
+        let client = StreamlineClient(configuration: config)
+
+        client.connect()
+
+        XCTAssertEqual(client.state, .disconnected)
+    }
 }
 
 // MARK: - RecordValidation Tests
 
 final class RecordValidationTests: XCTestCase {
-
     func testSmallRecordPasses() throws {
         let key = Data("key".utf8)
         let value = Data("value".utf8)
@@ -67,7 +105,7 @@ final class RecordValidationTests: XCTestCase {
                 return XCTFail("Expected StreamlineError")
             }
             XCTAssertEqual(streamlineError.errorCode, .serialization)
-            if case .serializationError(let detail) = streamlineError {
+            if case let .serializationError(detail) = streamlineError {
                 XCTAssertTrue(detail.contains("exceeds maximum"))
             }
         }
@@ -80,7 +118,7 @@ final class RecordValidationTests: XCTestCase {
             guard let streamlineError = error as? StreamlineError else {
                 return XCTFail("Expected StreamlineError")
             }
-            if case .serializationError(let detail) = streamlineError {
+            if case let .serializationError(detail) = streamlineError {
                 XCTAssertTrue(detail.contains("1048577"))
             }
         }
@@ -94,7 +132,6 @@ final class RecordValidationTests: XCTestCase {
 // MARK: - BatchBuffer Tests
 
 final class BatchBufferTests: XCTestCase {
-
     func testInitiallyEmpty() {
         let buffer = BatchBuffer<Int>()
         XCTAssertEqual(buffer.count, 0)
@@ -143,7 +180,7 @@ final class BatchBufferTests: XCTestCase {
 
     func testDefaultCapacity() {
         var buffer = BatchBuffer<Int>()
-        for i in 0..<999 {
+        for i in 0 ..< 999 {
             XCTAssertFalse(buffer.append(i), "Should not be full at \(i + 1)")
         }
         XCTAssertTrue(buffer.append(999))
@@ -166,10 +203,9 @@ final class BatchBufferTests: XCTestCase {
 // MARK: - Client Initialization & Configuration Tests
 
 final class ClientInitializationTests: XCTestCase {
-
-    func testClientStoresConfiguration() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://myhost:9092")!,
+    func testClientStoresConfiguration() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://myhost:9092")),
             autoReconnect: false,
             maxRetries: 3,
             timeout: 15,
@@ -183,44 +219,44 @@ final class ClientInitializationTests: XCTestCase {
         XCTAssertEqual(client.configuration.authToken, "token-123")
     }
 
-    func testClientAcceptsCustomProducerConfig() {
-        let producerConfig = ProducerConfig(batchSize: 32768, compression: .gzip, retries: 5)
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testClientAcceptsCustomProducerConfig() throws {
+        let producerConfig = ProducerConfig(batchSize: 32768, lingerMs: 5, retries: 5)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config, producerConfig: producerConfig)
         XCTAssertEqual(client.producerConfig.batchSize, 32768)
-        XCTAssertEqual(client.producerConfig.compression, .gzip)
+        XCTAssertEqual(client.producerConfig.lingerMs, 5)
         XCTAssertEqual(client.producerConfig.retries, 5)
     }
 
-    func testClientDefaultProducerConfig() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testClientDefaultProducerConfig() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         XCTAssertEqual(client.producerConfig.batchSize, 16384)
         XCTAssertEqual(client.producerConfig.compression, .none)
         XCTAssertEqual(client.producerConfig.retries, 3)
     }
 
-    func testClientAcceptsCustomURLSession() {
+    func testClientAcceptsCustomURLSession() throws {
         let sessionConfig = URLSessionConfiguration.ephemeral
         sessionConfig.timeoutIntervalForRequest = 5
         let customSession = URLSession(configuration: sessionConfig)
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config, session: customSession)
         XCTAssertNotNil(client)
         XCTAssertEqual(client.state, .disconnected)
     }
 
-    func testProducerConfigIsMutable() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testProducerConfigIsMutable() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
-        client.producerConfig = ProducerConfig(batchSize: 65536, compression: .zstd)
+        client.producerConfig = ProducerConfig(batchSize: 65536, lingerMs: 10)
         XCTAssertEqual(client.producerConfig.batchSize, 65536)
-        XCTAssertEqual(client.producerConfig.compression, .zstd)
+        XCTAssertEqual(client.producerConfig.lingerMs, 10)
     }
 
-    func testConfigurationWithAllSecurityOptions() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "wss://secure.example.com:9092")!,
+    func testConfigurationWithAllSecurityOptions() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "wss://secure.example.com:9092")),
             authToken: "jwt-token",
             tls: TlsConfig(
                 enabled: true,
@@ -232,15 +268,15 @@ final class ClientInitializationTests: XCTestCase {
             sasl: SaslConfig(mechanism: .scramSha512, username: "admin", password: "secret")
         )
         XCTAssertNotNil(config.tls)
-        XCTAssertTrue(config.tls!.enabled)
+        XCTAssertTrue(try XCTUnwrap(config.tls?.enabled))
         XCTAssertNotNil(config.sasl)
-        XCTAssertEqual(config.sasl!.mechanism, .scramSha512)
+        XCTAssertEqual(config.sasl?.mechanism, .scramSha512)
         XCTAssertEqual(config.authToken, "jwt-token")
     }
 
-    func testConfigurationPreservesBackoffSettings() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+    func testConfigurationPreservesBackoffSettings() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
             initialBackoff: 2.0,
             maxBackoff: 120
         )
@@ -248,9 +284,9 @@ final class ClientInitializationTests: XCTestCase {
         XCTAssertEqual(config.maxBackoff, 120)
     }
 
-    func testConfigurationWithEmbeddedProducerAndConsumer() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+    func testConfigurationWithEmbeddedProducerAndConsumer() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://localhost:9092")),
             producerConfig: ProducerConfig(batchSize: 4096, idempotent: true, acks: .all),
             consumerConfig: ConsumerConfig(groupId: "test-group", autoCommit: false, autoOffsetReset: .earliest)
         )
@@ -265,10 +301,9 @@ final class ClientInitializationTests: XCTestCase {
 // MARK: - Client Connection State Tests
 
 final class ClientConnectionStateTests: XCTestCase {
-
     private func makeClient(autoReconnect: Bool = true) -> StreamlineClient {
         let config = StreamlineConfiguration(
-            url: URL(string: "ws://localhost:9092")!,
+            url: requiredTestValue(URL(string: "ws://localhost:9092")),
             autoReconnect: autoReconnect
         )
         return StreamlineClient(configuration: config)
@@ -293,8 +328,8 @@ final class ClientConnectionStateTests: XCTestCase {
 
     func testConnectionStateEquatability() {
         let states: [ConnectionState] = [.disconnected, .connecting, .connected, .reconnecting]
-        for i in 0..<states.count {
-            for j in 0..<states.count {
+        for i in 0 ..< states.count {
+            for j in 0 ..< states.count {
                 if i == j {
                     XCTAssertEqual(states[i], states[j])
                 } else {
@@ -303,14 +338,206 @@ final class ClientConnectionStateTests: XCTestCase {
             }
         }
     }
+
+    func testInitialLifecycleSnapshotIsClosedWithNoReconnectTask() {
+        let client = makeClient()
+        let snapshot = client.reconnectLifecycleSnapshotForTesting()
+        XCTAssertTrue(snapshot.isClosed)
+        XCTAssertFalse(snapshot.hasReconnectTask)
+    }
+
+    func testDisconnectAlwaysLeavesClientClosedWithNoReconnectTask() {
+        let client = makeClient()
+        client.disconnect()
+        let snapshot = client.reconnectLifecycleSnapshotForTesting()
+        XCTAssertTrue(snapshot.isClosed, "disconnect() must mark the client closed")
+        XCTAssertFalse(snapshot.hasReconnectTask, "disconnect() must clear any reconnect task")
+    }
+}
+
+// MARK: - Reconnect Race Regression Tests
+
+final class ReconnectRaceRegressionTests: XCTestCase {
+    /// Regression test for a race where a reconnect `Task` scheduled by
+    /// `handleDisconnection` (triggered by the network layer) could be
+    /// created concurrently with an explicit `disconnect()` call and, absent
+    /// synchronization, "win" the race and resurrect a connection the caller
+    /// had already asked to close.
+    ///
+    /// `connect()` targets a host with nothing listening, so the WebSocket
+    /// layer itself asynchronously reports a disconnection shortly after —
+    /// naturally producing the same kind of concurrent
+    /// connect-failure/disconnect() interleaving that used to be racy,
+    /// without needing to reach into private reconnect internals.
+    func testExplicitDisconnectDuringConcurrentReconnectNeverResurrectsConnection() async throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://127.0.0.1:1")), // nothing listens here
+            autoReconnect: true,
+            maxRetries: 5,
+            initialBackoff: 0.02,
+            maxBackoff: 0.02
+        )
+        let client = StreamlineClient(configuration: config)
+
+        client.connect()
+        // Race disconnect() against the in-flight connection-failure/
+        // reconnect-scheduling path instead of waiting for it to settle.
+        client.disconnect()
+
+        // Give any (incorrectly) resurrected reconnect attempt, plus its
+        // backoff, ample time to fire before asserting.
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertEqual(client.state, .disconnected)
+        let snapshot = client.reconnectLifecycleSnapshotForTesting()
+        XCTAssertTrue(snapshot.isClosed)
+        XCTAssertFalse(snapshot.hasReconnectTask, "no reconnect task should survive an explicit disconnect()")
+    }
+
+    func testRepeatedConnectDisconnectNeverLeavesStaleReconnectTask() async throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://127.0.0.1:1")),
+            autoReconnect: true,
+            maxRetries: 3,
+            initialBackoff: 0.01,
+            maxBackoff: 0.01
+        )
+        let client = StreamlineClient(configuration: config)
+
+        for _ in 0 ..< 5 {
+            client.connect()
+            client.disconnect()
+        }
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        XCTAssertEqual(client.state, .disconnected)
+        let snapshot = client.reconnectLifecycleSnapshotForTesting()
+        XCTAssertTrue(snapshot.isClosed)
+        XCTAssertFalse(snapshot.hasReconnectTask)
+    }
+}
+
+// MARK: - Unsupported Offset Protocol Tests
+
+final class UnsupportedOffsetProtocolTests: XCTestCase {
+    private func makeClient() -> StreamlineClient {
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
+        return StreamlineClient(configuration: config)
+    }
+
+    func testCommitOffsetsFailsClosedWithoutBrokerAcknowledgementContract() async {
+        let client = makeClient()
+
+        do {
+            try await client.commitOffsets(["events:0": 42])
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case let .unsupported(reason) = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("acknowledgement"))
+            XCTAssertFalse(error.isRetryable)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    /// `position(topic:partition:)` must keep its pre-existing, non-throwing
+    /// `async -> Int64?` source shape so callers written against older
+    /// versions of this SDK keep compiling without adding `try`. With no
+    /// prior `seekToOffset`/`seekToBeginning` call for the partition it has
+    /// nothing locally cached, so it returns `nil` rather than throwing.
+    func testPositionKeepsNonThrowingShapeAndReturnsNilWhenUnknown() async {
+        let client = makeClient()
+
+        // No `try` here — this line would fail to compile if the source
+        // shape ever regressed back to `async throws`.
+        let result: Int64? = await client.position(topic: "events", partition: 0)
+
+        XCTAssertNil(result)
+    }
+
+    /// `position(topic:partition:)` reports the local, non-authoritative
+    /// hint left behind by `seekToOffset`, never an invented broker value.
+    /// A disconnected client cannot seek at all (`seekToOffset` requires a
+    /// live socket), so with no successful seek ever recorded the hint stays
+    /// `nil` — this is the same contract as the "unknown" case above,
+    /// confirmed here specifically against a client that never connected.
+    func testPositionReturnsNilWhenNoSeekHasEverSucceeded() async throws {
+        let client = makeClient()
+        XCTAssertEqual(client.state, .disconnected)
+
+        do {
+            try await client.seekToOffset(topic: "events", partition: 0, offset: 10)
+            XCTFail("Expected seekToOffset to fail while disconnected")
+        } catch let error as StreamlineError {
+            XCTAssertEqual(error, .notConnected)
+        }
+
+        let result = await client.position(topic: "events", partition: 0)
+        XCTAssertNil(result, "A failed seek must not leave behind a fabricated local hint")
+    }
+
+    /// `committed(topic:partition:)` must also keep its pre-existing,
+    /// non-throwing `async -> Int64?` shape. Because this SDK never durably
+    /// commits offsets, it always returns `nil` rather than throwing.
+    func testCommittedKeepsNonThrowingShapeAndAlwaysReturnsNil() async {
+        let client = makeClient()
+
+        let result: Int64? = await client.committed(topic: "events", partition: 0)
+
+        XCTAssertNil(result)
+    }
+
+    /// The new, separately named `queryPosition` API is the one that fails
+    /// closed with `.unsupported` — it must never be confused with the
+    /// source-compatible, non-throwing `position(topic:partition:)`.
+    func testQueryPositionFailsClosedWithoutResponseContract() async {
+        let client = makeClient()
+
+        do {
+            _ = try await client.queryPosition(topic: "events", partition: 0)
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case let .unsupported(reason) = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("response contract"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    /// The new, separately named `queryCommitted` API is the one that fails
+    /// closed with `.unsupported` — it must never be confused with the
+    /// source-compatible, non-throwing `committed(topic:partition:)`.
+    func testQueryCommittedFailsClosedWithoutResponseContract() async {
+        let client = makeClient()
+
+        do {
+            _ = try await client.queryCommitted(topic: "events", partition: 0)
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case let .unsupported(reason) = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("response contract"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }
 
 // MARK: - Offline Queue Tests
 
 final class OfflineQueueTests: XCTestCase {
-
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
@@ -323,7 +550,7 @@ final class OfflineQueueTests: XCTestCase {
 
     func testProduceMultipleMessagesWhileDisconnected() throws {
         let client = makeClient()
-        for i in 0..<100 {
+        for i in 0 ..< 100 {
             try client.produce(topic: "events", key: "key-\(i)", stringValue: "value-\(i)")
         }
         // All 100 should have been queued without error
@@ -332,7 +559,7 @@ final class OfflineQueueTests: XCTestCase {
     func testOfflineQueueOverflowThrows() {
         let client = makeClient()
         // Fill the queue to capacity (1000)
-        for i in 0..<1000 {
+        for i in 0 ..< 1000 {
             XCTAssertNoThrow(try client.produce(topic: "events", stringValue: "msg-\(i)"),
                              "Message \(i) should succeed")
         }
@@ -351,6 +578,83 @@ final class OfflineQueueTests: XCTestCase {
         let error = StreamlineError.offlineQueueFull
         XCTAssertTrue(error.hint.contains("1000"))
         XCTAssertTrue(error.hint.contains("Connect"))
+    }
+
+    /// Regression test: draining the offline queue must never silently drop
+    /// a message when re-driving it through `produce()` fails (previously
+    /// swallowed via `try?`). Failed messages must be requeued, in order,
+    /// and the failure surfaced to the delegate instead of vanishing.
+    func testDrainOfflineQueueRequeuesFailuresAndSurfacesError() throws {
+        let client = makeClient()
+        let delegate = DelegateProtocolTests.MockDelegate()
+        client.delegate = delegate
+
+        // Buffer messages while disconnected.
+        try client.produce(topic: "events", key: "k1", stringValue: "v1")
+        try client.produce(topic: "events", key: "k2", stringValue: "v2")
+        try client.produce(topic: "events", key: "k3", stringValue: "v3")
+        XCTAssertEqual(client.offlineQueueSnapshotForTesting().count, 3)
+
+        // Force every re-driven produce() call during drain to fail by
+        // tripping the circuit breaker open (checked before the
+        // disconnected-state branch inside produce()).
+        let breaker = CircuitBreaker(config: CircuitBreakerConfig(failureThreshold: 1))
+        breaker.recordFailure()
+        XCTAssertEqual(breaker.state(), .open)
+        client.circuitBreaker = breaker
+
+        client.drainOfflineQueueForTesting()
+
+        // All three messages must have been requeued — none silently lost.
+        let requeued = client.offlineQueueSnapshotForTesting()
+        XCTAssertEqual(requeued.count, 3)
+        XCTAssertEqual(requeued.map(\.key), ["k1", "k2", "k3"])
+
+        // The failure must be surfaced to the delegate, not swallowed.
+        XCTAssertEqual(delegate.encounteredErrors.count, 1)
+        XCTAssertEqual(delegate.encounteredErrors.first, .circuitOpen)
+    }
+
+    /// Regression test: once a produce attempt exhausts its retry budget the
+    /// message must be requeued for a future drain instead of being dropped
+    /// after only notifying the delegate.
+    func testExhaustedProduceRetriesRequeuesMessageAndSurfacesFailure() {
+        let client = makeClient()
+        let delegate = DelegateProtocolTests.MockDelegate()
+        client.delegate = delegate
+
+        let message = StreamlineMessage(topic: "events", key: "k1", stringValue: "v1")
+        let sendError = NSError(
+            domain: "test", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "boom"]
+        )
+
+        client.handleExhaustedProduceRetries(message: message, sendError: sendError)
+
+        XCTAssertEqual(client.offlineQueueSnapshotForTesting(), [message])
+        XCTAssertEqual(delegate.encounteredErrors.count, 1)
+        if case let .connectionFailed(reason) = delegate.encounteredErrors.first {
+            XCTAssertTrue(reason.contains("boom"))
+        } else {
+            XCTFail("Expected connectionFailed, got \(String(describing: delegate.encounteredErrors.first))")
+        }
+    }
+
+    /// Regression test: multiple exhausted messages must be requeued in
+    /// order (front of the offline queue) so a subsequent drain retries them
+    /// in the same order they were originally produced.
+    func testMultipleExhaustedProduceRetriesPreserveOrder() {
+        let client = makeClient()
+        let messages = (0 ..< 3).map {
+            StreamlineMessage(topic: "events", key: "k\($0)", stringValue: "v\($0)")
+        }
+        let sendError = NSError(domain: "test", code: 2)
+
+        for message in messages {
+            client.handleExhaustedProduceRetries(message: message, sendError: sendError)
+        }
+
+        XCTAssertEqual(client.offlineQueueSnapshotForTesting(), messages)
     }
 
     func testProduceWithDataPayload() throws {
@@ -378,9 +682,10 @@ final class OfflineQueueTests: XCTestCase {
 // MARK: - Subscription Management Tests
 
 final class SubscriptionManagementTests: XCTestCase {
-
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
@@ -452,25 +757,55 @@ final class SubscriptionManagementTests: XCTestCase {
 // MARK: - Offset Management Extended Tests
 
 final class OffsetManagementExtendedTests: XCTestCase {
-
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
-    func testPositionForMultiplePartitionsReturnsNil() async {
+    func testQueryPositionForMultiplePartitionsFailsClosedAsUnsupported() async {
         let client = makeClient()
-        for partition in 0..<10 {
-            let pos = await client.position(topic: "events", partition: partition)
-            XCTAssertNil(pos, "Partition \(partition) should have nil position initially")
+        for partition in 0 ..< 10 {
+            do {
+                _ = try await client.queryPosition(topic: "events", partition: partition)
+                XCTFail("Partition \(partition) should throw unsupported")
+            } catch let error as StreamlineError {
+                guard case .unsupported = error else {
+                    return XCTFail("Expected unsupported, got \(error)")
+                }
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
         }
     }
 
-    func testCommittedForMultiplePartitionsReturnsNil() async {
+    func testQueryCommittedForMultiplePartitionsFailsClosedAsUnsupported() async {
         let client = makeClient()
-        for partition in 0..<10 {
+        for partition in 0 ..< 10 {
+            do {
+                _ = try await client.queryCommitted(topic: "events", partition: partition)
+                XCTFail("Partition \(partition) should throw unsupported")
+            } catch let error as StreamlineError {
+                guard case .unsupported = error else {
+                    return XCTFail("Expected unsupported, got \(error)")
+                }
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    /// The source-compatible, non-throwing `position`/`committed` overloads
+    /// must never throw, even across many partitions — they only ever
+    /// report a local, non-authoritative hint (or `nil`).
+    func testPositionAndCommittedNeverThrowAcrossManyPartitions() async {
+        let client = makeClient()
+        for partition in 0 ..< 10 {
+            let position = await client.position(topic: "events", partition: partition)
             let committed = await client.committed(topic: "events", partition: partition)
-            XCTAssertNil(committed, "Partition \(partition) should have nil committed offset initially")
+            XCTAssertNil(position)
+            XCTAssertNil(committed)
         }
     }
 
@@ -478,10 +813,12 @@ final class OffsetManagementExtendedTests: XCTestCase {
         let client = makeClient()
         do {
             try await client.commitOffsets(["events:0": 42, "events:1": 84])
-            XCTFail("Expected notConnected error")
+            XCTFail("Expected unsupported error")
         } catch let error as StreamlineError {
-            XCTAssertEqual(error, .notConnected)
-            XCTAssertTrue(error.isRetryable)
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+            XCTAssertFalse(error.isRetryable)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -523,28 +860,35 @@ final class OffsetManagementExtendedTests: XCTestCase {
         }
     }
 
-    func testPositionForDifferentTopics() async {
+    func testQueryPositionForDifferentTopicsFailsClosedAsUnsupported() async {
         let client = makeClient()
-        let pos1 = await client.position(topic: "events", partition: 0)
-        let pos2 = await client.position(topic: "orders", partition: 0)
-        XCTAssertNil(pos1)
-        XCTAssertNil(pos2)
+        for topic in ["events", "orders"] {
+            do {
+                _ = try await client.queryPosition(topic: topic, partition: 0)
+                XCTFail("Topic \(topic) should throw unsupported")
+            } catch let error as StreamlineError {
+                guard case .unsupported = error else {
+                    return XCTFail("Expected unsupported, got \(error)")
+                }
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
     }
 }
 
 // MARK: - FlushBatch Tests
 
 final class FlushBatchTests: XCTestCase {
-
-    func testFlushBatchOnEmptyQueueDoesNothing() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testFlushBatchOnEmptyQueueDoesNothing() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         // Flush on empty queue should not crash
         client.flushBatch()
     }
 
     func testFlushBatchWhenDisconnected() throws {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let producerConfig = ProducerConfig(batchSize: 1_000_000, lingerMs: 60000)
         let client = StreamlineClient(configuration: config, producerConfig: producerConfig)
 
@@ -558,33 +902,34 @@ final class FlushBatchTests: XCTestCase {
 // MARK: - Delegate Protocol Tests
 
 final class DelegateProtocolTests: XCTestCase {
-
     final class MockDelegate: StreamlineClientDelegate {
         var stateChanges: [ConnectionState] = []
         var receivedMessages: [StreamlineMessage] = []
         var encounteredErrors: [StreamlineError] = []
 
-        func client(_ client: StreamlineClient, didChangeState state: ConnectionState) {
+        func client(_: StreamlineClient, didChangeState state: ConnectionState) {
             stateChanges.append(state)
         }
-        func client(_ client: StreamlineClient, didReceiveMessage message: StreamlineMessage) {
+
+        func client(_: StreamlineClient, didReceiveMessage message: StreamlineMessage) {
             receivedMessages.append(message)
         }
-        func client(_ client: StreamlineClient, didEncounterError error: StreamlineError) {
+
+        func client(_: StreamlineClient, didEncounterError error: StreamlineError) {
             encounteredErrors.append(error)
         }
     }
 
-    func testDelegateCanBeAssigned() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testDelegateCanBeAssigned() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         let delegate = MockDelegate()
         client.delegate = delegate
         XCTAssertNotNil(client.delegate)
     }
 
-    func testDelegateIsWeak() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testDelegateIsWeak() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
 
         var delegate: MockDelegate? = MockDelegate()
@@ -595,11 +940,11 @@ final class DelegateProtocolTests: XCTestCase {
         XCTAssertNil(client.delegate)
     }
 
-    func testDefaultDelegateImplementationsExist() {
+    func testDefaultDelegateImplementationsExist() throws {
         // Verify default extension methods don't crash when called
         final class MinimalDelegate: StreamlineClientDelegate {}
         let delegate = MinimalDelegate()
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         // These should use default empty implementations
         delegate.client(client, didChangeState: .connected)
@@ -611,7 +956,6 @@ final class DelegateProtocolTests: XCTestCase {
 // MARK: - Error Comprehensive Tests
 
 final class ErrorComprehensiveTests: XCTestCase {
-
     func testAllErrorCasesHaveUniqueErrorCodes() {
         // Map each error to its code, verify expected mappings
         let mappings: [(StreamlineError, ErrorCode)] = [
@@ -631,6 +975,7 @@ final class ErrorComprehensiveTests: XCTestCase {
             (.schemaRegistryError("x"), .schema),
             (.circuitOpen, .circuitOpen),
             (.internalError("x"), .internal),
+            (.unsupported("x"), .unsupported),
         ]
         for (error, expectedCode) in mappings {
             XCTAssertEqual(error.errorCode, expectedCode, "Error \(error) should map to \(expectedCode)")
@@ -661,6 +1006,7 @@ final class ErrorComprehensiveTests: XCTestCase {
             .queryFailed("x"),
             .schemaRegistryError("x"),
             .internalError("x"),
+            .unsupported("x"),
         ]
         for error in nonRetryable {
             XCTAssertFalse(error.isRetryable, "\(error) should NOT be retryable")
@@ -685,6 +1031,7 @@ final class ErrorComprehensiveTests: XCTestCase {
             .schemaRegistryError("not found"),
             .circuitOpen,
             .internalError("unexpected"),
+            .unsupported("offset commit"),
         ]
         for error in errors {
             XCTAssertFalse(error.hint.isEmpty, "\(error) should have a non-empty hint")
@@ -710,8 +1057,9 @@ final class ErrorComprehensiveTests: XCTestCase {
             StreamlineError.schemaRegistryError("x"),
             StreamlineError.circuitOpen,
             StreamlineError.internalError("x"),
+            StreamlineError.unsupported("x"),
         ]
-        XCTAssertEqual(errors.count, 16)
+        XCTAssertEqual(errors.count, 17)
         for error in errors {
             XCTAssertNotNil(error.localizedDescription)
         }
@@ -755,7 +1103,6 @@ final class ErrorComprehensiveTests: XCTestCase {
 // MARK: - CompatibilityLevel Tests
 
 final class CompatibilityLevelTests: XCTestCase {
-
     func testAllRawValues() {
         XCTAssertEqual(CompatibilityLevel.backward.rawValue, "BACKWARD")
         XCTAssertEqual(CompatibilityLevel.forward.rawValue, "FORWARD")
@@ -770,7 +1117,7 @@ final class CompatibilityLevelTests: XCTestCase {
         XCTAssertEqual(CompatibilityLevel(rawValue: "BACKWARD"), .backward)
         XCTAssertEqual(CompatibilityLevel(rawValue: "FORWARD"), .forward)
         XCTAssertEqual(CompatibilityLevel(rawValue: "FULL"), .full)
-        XCTAssertEqual(CompatibilityLevel(rawValue: "NONE"), .none)
+        XCTAssertEqual(CompatibilityLevel(rawValue: "NONE"), CompatibilityLevel.none)
         XCTAssertNil(CompatibilityLevel(rawValue: "INVALID"))
     }
 

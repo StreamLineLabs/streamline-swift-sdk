@@ -26,14 +26,21 @@ package: ## Build release
 	swift build -c release
 
 integration-test: ## Run integration tests (requires Docker)
+	@docker manifest inspect ghcr.io/streamlinelabs/streamline:0.4.0 >/dev/null || \
+		{ echo "Pinned Streamline 0.4.0 integration image is unavailable or requires credentials"; exit 1; }
 	docker compose -f docker-compose.test.yml up -d
-	@echo "Waiting for Streamline server..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:9094/health/live > /dev/null 2>&1; then \
-			echo "Server ready"; \
-			break; \
-		fi; \
-		sleep 2; \
-	done
-	swift test --filter ConformanceTests || true
-	docker compose -f docker-compose.test.yml down -v
+	@trap 'docker compose -f docker-compose.test.yml down -v' EXIT; \
+		echo "Waiting for Streamline server..."; \
+		ready=0; \
+		for i in $$(seq 1 30); do \
+			if curl -sf http://localhost:9094/health > /dev/null 2>&1; then \
+				echo "Server ready"; \
+				ready=1; \
+				break; \
+			fi; \
+			sleep 2; \
+		done; \
+		test "$$ready" -eq 1; \
+		STREAMLINE_HTTP_URL=http://localhost:9094 \
+		STREAMLINE_WEBSOCKET_URL=ws://localhost:9092 \
+		swift test --filter IntegrationTests

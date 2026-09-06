@@ -1,18 +1,19 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 // MARK: - ErrorCode Tests
 
 final class ErrorCodeTests: XCTestCase {
-
     func testAllErrorCodesExist() {
         let codes: [ErrorCode] = [
             .connection, .timeout, .authentication, .authorization,
             .topicNotFound, .partitionNotFound, .protocol, .serialization,
             .schema, .configuration, .internal, .circuitOpen,
+            .contractViolation, .attestationFailed, .memoryAccessDenied,
+            .branchQuotaExceeded, .semanticSearchUnavailable, .unsupported,
         ]
-        XCTAssertEqual(codes.count, 12)
-        XCTAssertEqual(ErrorCode.allCases.count, 12)
+        XCTAssertEqual(codes.count, 18)
+        XCTAssertEqual(ErrorCode.allCases.count, 18)
     }
 
     func testErrorCodeRawValues() {
@@ -30,7 +31,6 @@ final class ErrorCodeTests: XCTestCase {
 // MARK: - StreamlineError ErrorCode Mapping
 
 final class ErrorCodeMappingTests: XCTestCase {
-
     func testNotConnectedMapsToConnection() {
         XCTAssertEqual(StreamlineError.notConnected.errorCode, .connection)
     }
@@ -75,6 +75,12 @@ final class ErrorCodeMappingTests: XCTestCase {
         XCTAssertEqual(StreamlineError.configurationError("bad url").errorCode, .configuration)
     }
 
+    func testUnsupportedMapsToUnsupportedAndIsNotRetryable() {
+        let error = StreamlineError.unsupported("no acknowledgement contract")
+        XCTAssertEqual(error.errorCode, .unsupported)
+        XCTAssertFalse(error.isRetryable)
+    }
+
     func testOfflineQueueFullMapsToInternal() {
         XCTAssertEqual(StreamlineError.offlineQueueFull.errorCode, .internal)
     }
@@ -99,7 +105,6 @@ final class ErrorCodeMappingTests: XCTestCase {
 // MARK: - isRetryable Tests
 
 final class ErrorRetryableTests: XCTestCase {
-
     func testConnectionErrorsAreRetryable() {
         XCTAssertTrue(StreamlineError.notConnected.isRetryable)
         XCTAssertTrue(StreamlineError.connectionFailed("refused").isRetryable)
@@ -161,7 +166,6 @@ final class ErrorRetryableTests: XCTestCase {
 // MARK: - Error Hint Tests
 
 final class ErrorHintTests: XCTestCase {
-
     func testNotConnectedHint() {
         let hint = StreamlineError.notConnected.hint
         XCTAssertTrue(hint.contains("connect()"))
@@ -247,6 +251,7 @@ final class ErrorHintTests: XCTestCase {
             .schemaRegistryError("x"),
             .circuitOpen,
             .internalError("x"),
+            .unsupported("x"),
         ]
         for error in errors {
             XCTAssertFalse(error.hint.isEmpty, "\(error) has empty hint")
@@ -257,7 +262,6 @@ final class ErrorHintTests: XCTestCase {
 // MARK: - New Error Cases
 
 final class NewErrorCaseTests: XCTestCase {
-
     func testPartitionNotFoundEquality() {
         XCTAssertEqual(StreamlineError.partitionNotFound("x"), StreamlineError.partitionNotFound("x"))
         XCTAssertNotEqual(StreamlineError.partitionNotFound("x"), StreamlineError.partitionNotFound("y"))
@@ -300,19 +304,22 @@ final class NewErrorCaseTests: XCTestCase {
 // MARK: - Consumer Offset Management Tests
 
 final class OffsetManagementTests: XCTestCase {
-
     private func makeClient() -> StreamlineClient {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = StreamlineConfiguration(
+            url: requiredTestValue(URL(string: "ws://localhost:9092"))
+        )
         return StreamlineClient(configuration: config)
     }
 
-    func testCommitOffsetsThrowsWhenDisconnected() async {
+    func testCommitOffsetsFailsClosedAsUnsupported() async {
         let client = makeClient()
         do {
             try await client.commitOffsets(["events:0": 42])
-            XCTFail("Expected notConnected error")
+            XCTFail("Expected unsupported error")
         } catch let error as StreamlineError {
-            XCTAssertEqual(error, .notConnected)
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -354,23 +361,38 @@ final class OffsetManagementTests: XCTestCase {
         }
     }
 
-    func testPositionReturnsNilInitially() async {
+    func testPositionFailsClosedAsUnsupported() async {
         let client = makeClient()
-        let pos = await client.position(topic: "events", partition: 0)
-        XCTAssertNil(pos)
+        do {
+            _ = try await client.queryPosition(topic: "events", partition: 0)
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
-    func testCommittedReturnsNilInitially() async {
+    func testCommittedFailsClosedAsUnsupported() async {
         let client = makeClient()
-        let committed = await client.committed(topic: "events", partition: 0)
-        XCTAssertNil(committed)
+        do {
+            _ = try await client.queryCommitted(topic: "events", partition: 0)
+            XCTFail("Expected unsupported error")
+        } catch let error as StreamlineError {
+            guard case .unsupported = error else {
+                return XCTFail("Expected unsupported, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 }
 
 // MARK: - CircuitBreaker Tests
 
 final class CircuitBreakerTests: XCTestCase {
-
     // MARK: - Configuration
 
     func testDefaultConfig() {
@@ -426,16 +448,16 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertNoThrow(try cb.check())
     }
 
-    func testCheckIncrementsRequestCount() {
+    func testCheckIncrementsRequestCount() throws {
         let cb = CircuitBreaker()
-        try! cb.check()
-        try! cb.check()
+        try cb.check()
+        try cb.check()
         XCTAssertEqual(cb.counts().requests, 2)
     }
 
-    func testRecordSuccessIncrementsCounts() {
+    func testRecordSuccessIncrementsCounts() throws {
         let cb = CircuitBreaker()
-        try! cb.check()
+        try cb.check()
         cb.recordSuccess()
         let c = cb.counts()
         XCTAssertEqual(c.consecutiveSuccesses, 1)
@@ -443,9 +465,9 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertEqual(c.consecutiveFailures, 0)
     }
 
-    func testRecordFailureIncrementsCounts() {
+    func testRecordFailureIncrementsCounts() throws {
         let cb = CircuitBreaker()
-        try! cb.check()
+        try cb.check()
         cb.recordFailure()
         let c = cb.counts()
         XCTAssertEqual(c.consecutiveFailures, 1)
@@ -621,7 +643,7 @@ final class CircuitBreakerTests: XCTestCase {
         let cb = CircuitBreaker(config: CircuitBreakerConfig(failureThreshold: 100))
         let group = DispatchGroup()
 
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             group.enter()
             DispatchQueue.global().async {
                 try? cb.check()

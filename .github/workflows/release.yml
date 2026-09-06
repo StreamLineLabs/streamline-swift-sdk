@@ -5,27 +5,86 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  validate-version:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Match tag, SDK constant, and changelog
+        run: |
+          VERSION=$(sed -n 's/public let streamlineSDKVersion = "\(.*\)"/\1/p' Sources/StreamlineSDK/Configuration.swift)
+          test -n "$VERSION"
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          grep -F "## [$VERSION]" CHANGELOG.md
+
   test:
     name: Test (${{ matrix.os }})
+    needs: validate-version
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
         if: runner.os == 'Linux'
+        with:
+          # Pinned (rather than left to the action's floating default) so a
+          # fresh checkout resolves and builds reproducibly instead of
+          # drifting with whatever Swift release happens to be current when
+          # this job runs. 6.1 is a hard floor on Linux, for two independent
+          # reasons — not just to parse a dependency manifest:
+          #   1. swift-corelibs-foundation's `URLSession.data(for:)` and the
+          #      completion-handler overloads of `URLSessionWebSocketTask`
+          #      that StreamlineClient/AdminClient use are incomplete on
+          #      Linux before 6.1 — confirmed by directly building this
+          #      package under swift:5.9/5.10/6.0-jammy containers, all of
+          #      which fail with "value of type 'URLSession' has no member
+          #      'data'" / "cannot infer type of closure parameter" even
+          #      though the exact same source builds cleanly on Darwin at
+          #      any of those versions (Apple's Foundation there is already
+          #      complete). This is a Linux-toolchain floor independent of
+          #      any dependency.
+          #   2. It must parse the pinned swift-crypto 4.5.2 manifest.
+          # See Package.swift for the dependency-version reasoning.
+          swift-version: '6.1'
       - run: swift build
       - run: swift test
 
-  release:
-    needs: test
+  integration:
+    name: Integration tests
+    needs: validate-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
+        with:
+          # Aligned with ci.yml/integration.yml/codeql.yml — see the `test`
+          # job above for why 6.1 is required on Linux (both to build this
+          # package's own WebSocket/URLSession code against a complete
+          # FoundationNetworking, and to parse the pinned swift-crypto
+          # manifest).
+          swift-version: '6.1'
+      - run: make integration-test
+
+  release:
+    needs: [test, integration]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true

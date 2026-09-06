@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// HTTP-based Schema Registry client for managing schemas.
 ///
 /// Uses Swift actor isolation for thread-safe access to the schema cache
@@ -14,12 +18,12 @@ import Foundation
 /// let compatible = try await registry.checkCompatibility(subject: "orders-value", schema: newSchema, format: .json)
 /// ```
 public actor SchemaRegistryClient {
-
     // MARK: - Properties
 
     private let baseURL: URL
     private let authToken: String?
     private let session: URLSession
+    private let requestObserver: HTTPRequestObserver?
     private var cache: [String: SchemaInfo] = [:]
 
     // MARK: - Init
@@ -28,6 +32,19 @@ public actor SchemaRegistryClient {
         self.baseURL = baseURL
         self.authToken = authToken
         self.session = session
+        requestObserver = nil
+    }
+
+    init(
+        baseURL: URL,
+        authToken: String? = nil,
+        session: URLSession = .shared,
+        requestObserver: @escaping HTTPRequestObserver
+    ) {
+        self.baseURL = baseURL
+        self.authToken = authToken
+        self.session = session
+        self.requestObserver = requestObserver
     }
 
     // MARK: - Cache Management
@@ -64,7 +81,8 @@ public actor SchemaRegistryClient {
         let data = try JSONSerialization.data(withJSONObject: body)
         let responseData = try await request(.post, path: "/subjects/\(encode(subject))/versions", body: data)
         guard let dict = try JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-              let id = dict["id"] as? Int else {
+              let id = dict["id"] as? Int
+        else {
             throw StreamlineError.schemaRegistryError("Invalid register response")
         }
         return id
@@ -140,7 +158,8 @@ public actor SchemaRegistryClient {
             body: bodyData
         )
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let isCompatible = dict["is_compatible"] as? Bool else {
+              let isCompatible = dict["is_compatible"] as? Bool
+        else {
             throw StreamlineError.schemaRegistryError("Invalid compatibility response")
         }
         return isCompatible
@@ -151,7 +170,8 @@ public actor SchemaRegistryClient {
         let data = try await request(.get, path: "/config/\(encode(subject))")
         guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let levelStr = dict["compatibilityLevel"] as? String ?? dict["compatibility"] as? String,
-              let level = CompatibilityLevel(rawValue: levelStr) else {
+              let level = CompatibilityLevel(rawValue: levelStr)
+        else {
             throw StreamlineError.schemaRegistryError("Invalid compatibility level response")
         }
         return level
@@ -208,6 +228,8 @@ public actor SchemaRegistryClient {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
+        requestObserver?(urlRequest)
+
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: urlRequest)
@@ -220,7 +242,7 @@ public actor SchemaRegistryClient {
         }
 
         switch httpResponse.statusCode {
-        case 200...299:
+        case 200 ... 299:
             return data
         case 401:
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -236,6 +258,6 @@ public actor SchemaRegistryClient {
     }
 
     private func encode(_ subject: String) -> String {
-        subject.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? subject
+        URLPathSegmentEncoder.encode(subject)
     }
 }

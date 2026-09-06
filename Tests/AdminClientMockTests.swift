@@ -1,20 +1,20 @@
-import XCTest
-@testable import StreamlineSDK
 import Foundation
+@testable import StreamlineSDK
+import XCTest
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 // MARK: - Mock URLProtocol for HTTP Testing
 
 /// A URLProtocol subclass that intercepts HTTP requests and returns mock responses.
 /// This allows testing AdminClient and SchemaRegistryClient without a real server.
 final class MockURLProtocol: URLProtocol {
-
     /// Handler type: receives a request and returns (response, data) or throws.
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
-    /// Captured requests for assertion.
-    static var capturedRequests: [URLRequest] = []
-
-    override class func canInit(with request: URLRequest) -> Bool {
+    override class func canInit(with _: URLRequest) -> Bool {
         true
     }
 
@@ -23,8 +23,6 @@ final class MockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        MockURLProtocol.capturedRequests.append(request)
-
         guard let handler = MockURLProtocol.requestHandler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
@@ -44,7 +42,6 @@ final class MockURLProtocol: URLProtocol {
 
     static func reset() {
         requestHandler = nil
-        capturedRequests = []
     }
 }
 
@@ -57,21 +54,20 @@ private func makeMockSession() -> URLSession {
 }
 
 private func jsonResponse(_ statusCode: Int, json: Any, url: URL? = nil) -> (HTTPURLResponse, Data) {
-    let responseURL = url ?? URL(string: "http://localhost:9094")!
-    let response = HTTPURLResponse(
+    let responseURL = url ?? requiredTestValue(URL(string: "http://localhost:9094"))
+    let response = requiredTestValue(HTTPURLResponse(
         url: responseURL,
         statusCode: statusCode,
         httpVersion: "HTTP/1.1",
         headerFields: ["Content-Type": "application/json"]
-    )!
-    let data = try! JSONSerialization.data(withJSONObject: json)
+    ))
+    let data = testJSONData(json)
     return (response, data)
 }
 
 // MARK: - AdminClient List Topics Tests
 
 final class AdminClientListTopicsTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
@@ -79,7 +75,7 @@ final class AdminClientListTopicsTests: XCTestCase {
 
     func testListTopicsReturnsTopics() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics"))
             XCTAssertEqual(request.httpMethod, "GET")
             return jsonResponse(200, json: [
                 ["name": "events", "partitions": 3, "replication_factor": 1, "message_count": 100],
@@ -87,7 +83,7 @@ final class AdminClientListTopicsTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let topics = try await admin.listTopics()
 
         XCTAssertEqual(topics.count, 2)
@@ -104,26 +100,28 @@ final class AdminClientListTopicsTests: XCTestCase {
             jsonResponse(200, json: [Any]())
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let topics = try await admin.listTopics()
         XCTAssertTrue(topics.isEmpty)
     }
 
-    func testListTopicsHandlesServerError() async {
+    func testListTopicsHandlesServerError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(500, json: ["error": "internal server error"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.listTopics()
             XCTFail("Expected error")
         } catch let error as StreamlineError {
-            if case .adminOperationFailed(let msg) = error {
+            if case let .adminOperationFailed(msg) = error {
                 XCTAssertTrue(msg.contains("500"))
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }
@@ -131,7 +129,6 @@ final class AdminClientListTopicsTests: XCTestCase {
 // MARK: - AdminClient Describe Topic Tests
 
 final class AdminClientDescribeTopicTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
@@ -139,7 +136,7 @@ final class AdminClientDescribeTopicTests: XCTestCase {
 
     func testDescribeTopicReturnsDescription() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics/events"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics/events"))
             return jsonResponse(200, json: [
                 "name": "events",
                 "partitions": 6,
@@ -149,7 +146,7 @@ final class AdminClientDescribeTopicTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let desc = try await admin.describeTopic(name: "events")
 
         XCTAssertEqual(desc.name, "events")
@@ -160,12 +157,12 @@ final class AdminClientDescribeTopicTests: XCTestCase {
         XCTAssertEqual(desc.config["cleanup.policy"], "delete")
     }
 
-    func testDescribeTopicHandles404() async {
+    func testDescribeTopicHandles404() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(404, json: ["error": "not found"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.describeTopic(name: "nonexistent")
             XCTFail("Expected topicNotFound error")
@@ -175,61 +172,201 @@ final class AdminClientDescribeTopicTests: XCTestCase {
             } else {
                 XCTFail("Expected topicNotFound, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
+    }
+}
+
+// MARK: - URL Path Segment Encoding Tests
+
+//
+// AdminClient interpolates caller-supplied identifiers (consumer group IDs in
+// particular accept any non-empty string — TopicNameValidator only restricts
+// topic names) directly into HTTP request paths. Without percent-encoding,
+// a value such as "../v1/admin" or one containing "/" could make the actual
+// request target a different path than the one the caller specified. These
+// tests pin the behavior of ``URLPathSegmentEncoder`` and confirm AdminClient
+// applies it consistently before constructing a request URL.
+
+final class URLPathSegmentEncoderTests: XCTestCase {
+    func testUnreservedCharactersPassThroughUnchanged() {
+        let input = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        XCTAssertEqual(URLPathSegmentEncoder.encode(input), input)
+    }
+
+    func testPathSeparatorIsPercentEncoded() {
+        XCTAssertEqual(URLPathSegmentEncoder.encode("foo/bar"), "foo%2Fbar")
+    }
+
+    func testDotDotSegmentDoesNotSurviveAsLiteralTraversal() {
+        // "." and "_"/"-" are unreserved and pass through unencoded, but the
+        // "/" that would be needed to actually traverse a path is always
+        // encoded, so "../" can never become a real path separator.
+        XCTAssertEqual(URLPathSegmentEncoder.encode("../admin"), "..%2Fadmin")
+    }
+
+    func testSpaceAndReservedURLCharactersAreEncoded() {
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a b"), "a%20b")
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a?b"), "a%3Fb")
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a#b"), "a%23b")
+        XCTAssertEqual(URLPathSegmentEncoder.encode("a&b=c"), "a%26b%3Dc")
+    }
+
+    func testEmptyStringEncodesToEmptyString() {
+        XCTAssertEqual(URLPathSegmentEncoder.encode(""), "")
+    }
+
+    func testNonASCIICharactersAreEncodedAsUTF8Bytes() {
+        // "é" is 2 UTF-8 bytes (0xC3 0xA9).
+        XCTAssertEqual(URLPathSegmentEncoder.encode("é"), "%C3%A9")
+    }
+}
+
+final class AdminClientPathEncodingTests: XCTestCase {
+    override func tearDown() {
+        MockURLProtocol.reset()
+        super.tearDown()
+    }
+
+    /// A malicious consumer group ID attempting a path traversal must not
+    /// change the request's actual path prefix — it must be confined to a
+    /// single, percent-encoded path segment.
+    func testConsumerGroupPathTraversalIsConfinedToOneSegment() async throws {
+        var capturedURL: URL?
+        MockURLProtocol.requestHandler = { request in
+            capturedURL = request.url
+            return jsonResponse(200, json: [
+                "id": "whatever", "state": "stable", "members": [Any](), "protocol": "consumer",
+            ])
+        }
+
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
+        _ = try await admin.describeConsumerGroup(groupId: "../v1/admin")
+
+        let url = try XCTUnwrap(capturedURL)
+        // Assert against the *encoded* wire path (`percentEncodedPath`), not
+        // the decoded `URL.path`. `.path` silently turns the escaped "%2F"
+        // back into a literal "/", which would make a safely-confined single
+        // segment indistinguishable from an actual, unescaped path-traversal
+        // segment — exactly the distinction this test exists to verify. Both
+        // forms decode to the same string, so checking `.path` alone cannot
+        // tell a safe encoded segment apart from a real traversal.
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let encodedPath = components.percentEncodedPath
+        XCTAssertTrue(
+            encodedPath.hasPrefix("/v1/consumer-groups/"),
+            "Path traversal must not escape the consumer-groups prefix, got: \(encodedPath)"
+        )
+        let segment = encodedPath.dropFirst("/v1/consumer-groups/".count)
+        XCTAssertFalse(
+            segment.contains("/"),
+            "Traversal must be confined to a single opaque segment, got: \(encodedPath)"
+        )
+        XCTAssertEqual(encodedPath, "/v1/consumer-groups/..%2Fv1%2Fadmin")
+    }
+
+    func testConsumerGroupIdWithSlashIsPercentEncodedInRequestPath() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return jsonResponse(200, json: [
+                "id": "a/b", "state": "stable", "members": [Any](), "protocol": "consumer",
+            ])
+        }
+
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
+        _ = try await admin.describeConsumerGroup(groupId: "a/b")
+
+        let request = try XCTUnwrap(capturedRequest)
+        let url = try XCTUnwrap(request.url)
+        // The raw request URL must carry the encoded form, not a literal "/".
+        XCTAssertTrue(url.absoluteString.contains("a%2Fb"))
+        // Assert against the encoded path, not the decoded `URL.path`: `.path`
+        // would turn "%2F" back into "/", making the assertion below
+        // trivially (and incorrectly) pass even if encoding were broken.
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertFalse(components.percentEncodedPath.hasSuffix("/a/b"))
+        XCTAssertTrue(components.percentEncodedPath.hasSuffix("a%2Fb"))
+    }
+
+    func testDeleteConsumerGroupEncodesSpecialCharacters() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return jsonResponse(200, json: [String: Any]())
+        }
+
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
+        try await admin.deleteConsumerGroup(groupId: "group with spaces")
+
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertTrue(try XCTUnwrap(request.url?.absoluteString.contains("group%20with%20spaces")))
     }
 }
 
 // MARK: - AdminClient Create/Delete Topic Tests
 
 final class AdminClientTopicMutationTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
     }
 
     func testCreateTopicSendsCorrectPayload() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics"))
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
-
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["name"] as? String, "new-topic")
-            XCTAssertEqual(body["partitions"] as? Int, 3)
-            XCTAssertEqual(body["replication_factor"] as? Int, 2)
-
             return jsonResponse(201, json: ["created": true])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
+        )
         try await admin.createTopic(name: "new-topic", partitions: 3, replicationFactor: 2)
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics"))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["name"] as? String, "new-topic")
+        XCTAssertEqual(body["partitions"] as? Int, 3)
+        XCTAssertEqual(body["replication_factor"] as? Int, 2)
     }
 
     func testCreateTopicWithConfig() async throws {
-        MockURLProtocol.requestHandler = { request in
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertNotNil(body["config"])
-            let config = body["config"] as! [String: String]
-            XCTAssertEqual(config["retention.ms"], "3600000")
-            return jsonResponse(201, json: ["created": true])
+        let recorder = URLRequestRecorder()
+        MockURLProtocol.requestHandler = { _ in
+            jsonResponse(201, json: ["created": true])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
+        )
         try await admin.createTopic(
             name: "configured-topic",
             config: ["retention.ms": "3600000"]
         )
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        let config = try XCTUnwrap(body["config"] as? [String: String])
+        XCTAssertEqual(config["retention.ms"], "3600000")
     }
 
     func testDeleteTopicSendsDeleteRequest() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "DELETE")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/topics/old-topic"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/topics/old-topic"))
             return jsonResponse(200, json: ["deleted": true])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         try await admin.deleteTopic(name: "old-topic")
     }
 }
@@ -237,7 +374,6 @@ final class AdminClientTopicMutationTests: XCTestCase {
 // MARK: - AdminClient Consumer Group Tests
 
 final class AdminClientConsumerGroupTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
@@ -251,7 +387,7 @@ final class AdminClientConsumerGroupTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let groups = try await admin.listConsumerGroups()
 
         XCTAssertEqual(groups.count, 2)
@@ -279,7 +415,7 @@ final class AdminClientConsumerGroupTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let desc = try await admin.describeConsumerGroup(groupId: "group-1")
 
         XCTAssertEqual(desc.id, "group-1")
@@ -295,11 +431,13 @@ final class AdminClientConsumerGroupTests: XCTestCase {
     func testDeleteConsumerGroup() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "DELETE")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/consumer-groups/group-1"))
+            XCTAssertTrue(
+                try XCTUnwrap(request.url).absoluteString.contains("/v1/consumer-groups/group-1")
+            )
             return jsonResponse(200, json: ["deleted": true])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         try await admin.deleteConsumerGroup(groupId: "group-1")
     }
 }
@@ -307,19 +445,17 @@ final class AdminClientConsumerGroupTests: XCTestCase {
 // MARK: - AdminClient Query Tests
 
 final class AdminClientQueryTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
     }
 
-    func testQueryReturnsResults() async throws {
+    func testQueryReturnsResultsAndCapturesBodyBeforeURLSession() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/query"))
-
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["query"] as? String, "SELECT * FROM events LIMIT 5")
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.absoluteString.contains("/v1/query"))
 
             return jsonResponse(200, json: [
                 "columns": ["key", "value", "offset"],
@@ -328,9 +464,18 @@ final class AdminClientQueryTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
+        )
         let result = try await admin.query("SELECT * FROM events LIMIT 5")
 
+        // The observer runs before URLSession can transform the request, so
+        // this assertion is identical under Foundation and FoundationNetworking.
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["query"] as? String, "SELECT * FROM events LIMIT 5")
         XCTAssertEqual(result.columns, ["key", "value", "offset"])
         XCTAssertEqual(result.rows.count, 2)
         XCTAssertEqual(result.rows[0], ["k1", "v1", "0"])
@@ -346,7 +491,7 @@ final class AdminClientQueryTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let result = try await admin.query("SELECT * FROM events WHERE key = 'nonexistent'")
 
         XCTAssertEqual(result.columns, ["key", "value"])
@@ -358,7 +503,6 @@ final class AdminClientQueryTests: XCTestCase {
 // MARK: - AdminClient Server Info Tests
 
 final class AdminClientServerInfoTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
@@ -366,50 +510,50 @@ final class AdminClientServerInfoTests: XCTestCase {
 
     func testServerInfoReturnsData() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.absoluteString.contains("/v1/info"))
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/v1/info"))
             return jsonResponse(200, json: [
                 "version": "0.2.0",
                 "uptime": 7200,
                 "topic_count": 5,
-                "message_count": 100000,
+                "message_count": 100_000,
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let info = try await admin.serverInfo()
 
         XCTAssertEqual(info.version, "0.2.0")
         XCTAssertEqual(info.uptime, 7200)
         XCTAssertEqual(info.topicCount, 5)
-        XCTAssertEqual(info.messageCount, 100000)
+        XCTAssertEqual(info.messageCount, 100_000)
     }
 
-    func testIsHealthyReturnsTrue() async {
+    func testIsHealthyReturnsTrue() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(200, json: ["status": "ok"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let healthy = await admin.isHealthy()
         XCTAssertTrue(healthy)
     }
 
-    func testIsHealthyReturnsFalseOnError() async {
+    func testIsHealthyReturnsFalseOnError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(503, json: ["status": "unavailable"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let healthy = await admin.isHealthy()
         XCTAssertFalse(healthy)
     }
 
-    func testIsHealthyReturnsFalseOnNetworkError() async {
+    func testIsHealthyReturnsFalseOnNetworkError() async throws {
         MockURLProtocol.requestHandler = { _ in
             throw URLError(.notConnectedToInternet)
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let healthy = await admin.isHealthy()
         XCTAssertFalse(healthy)
     }
@@ -418,7 +562,6 @@ final class AdminClientServerInfoTests: XCTestCase {
 // MARK: - AdminClient Authentication Tests
 
 final class AdminClientAuthTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
@@ -431,8 +574,8 @@ final class AdminClientAuthTests: XCTestCase {
             return jsonResponse(200, json: [Any]())
         }
 
-        let admin = AdminClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let admin = try AdminClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             authToken: "my-secret-token",
             session: makeMockSession()
         )
@@ -446,25 +589,27 @@ final class AdminClientAuthTests: XCTestCase {
             return jsonResponse(200, json: [Any]())
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         _ = try await admin.listTopics()
     }
 
-    func testUnauthorizedResponseThrowsAuthError() async {
+    func testUnauthorizedResponseThrowsAuthError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(401, json: ["error": "Unauthorized"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.listTopics()
             XCTFail("Expected authentication error")
         } catch let error as StreamlineError {
-            if case .authenticationFailed(let msg) = error {
+            if case let .authenticationFailed(msg) = error {
                 XCTAssertTrue(msg.contains("Unauthorized"))
             } else {
                 XCTFail("Expected authenticationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }
@@ -472,18 +617,17 @@ final class AdminClientAuthTests: XCTestCase {
 // MARK: - AdminClient Error Response Tests
 
 final class AdminClientErrorResponseTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
     }
 
-    func testNotFoundResponseThrowsTopicNotFound() async {
+    func testNotFoundResponseThrowsTopicNotFound() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(404, json: ["error": "not found"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.describeTopic(name: "missing")
             XCTFail("Expected topicNotFound error")
@@ -493,60 +637,68 @@ final class AdminClientErrorResponseTests: XCTestCase {
             } else {
                 XCTFail("Expected topicNotFound, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testServerErrorThrowsAdminOperationFailed() async {
+    func testServerErrorThrowsAdminOperationFailed() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(500, json: ["error": "internal"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.serverInfo()
             XCTFail("Expected adminOperationFailed error")
         } catch let error as StreamlineError {
-            if case .adminOperationFailed(let msg) = error {
+            if case let .adminOperationFailed(msg) = error {
                 XCTAssertTrue(msg.contains("500"))
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testNetworkErrorThrowsAdminOperationFailed() async {
+    func testNetworkErrorThrowsAdminOperationFailed() async throws {
         MockURLProtocol.requestHandler = { _ in
             throw URLError(.timedOut)
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.listTopics()
             XCTFail("Expected error")
         } catch let error as StreamlineError {
-            if case .adminOperationFailed(let msg) = error {
+            if case let .adminOperationFailed(msg) = error {
                 XCTAssertTrue(msg.contains("Request failed"))
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testBadGatewayResponseThrowsAdminError() async {
+    func testBadGatewayResponseThrowsAdminError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(502, json: ["error": "bad gateway"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.listConsumerGroups()
             XCTFail("Expected adminOperationFailed error")
         } catch let error as StreamlineError {
-            if case .adminOperationFailed(let msg) = error {
+            if case let .adminOperationFailed(msg) = error {
                 XCTAssertTrue(msg.contains("502"))
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 }
@@ -554,31 +706,34 @@ final class AdminClientErrorResponseTests: XCTestCase {
 // MARK: - SchemaRegistryClient Mock Tests
 
 final class SchemaRegistryClientMockTests: XCTestCase {
-
     override func tearDown() {
         MockURLProtocol.reset()
         super.tearDown()
     }
 
     func testRegisterSchemaReturnsId() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertTrue(request.url!.absoluteString.contains("/subjects/orders-value/versions"))
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["schemaType"] as? String, "JSON")
-            XCTAssertNotNil(body["schema"])
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.contains("/subjects/orders-value/versions"))
             return jsonResponse(200, json: ["id": 42])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
-            session: makeMockSession()
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
         )
         let id = try await registry.registerSchema(
             subject: "orders-value",
             schema: #"{"type":"object"}"#,
             format: .json
         )
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["schemaType"] as? String, "JSON")
+        XCTAssertEqual(body["schema"] as? String, #"{"type":"object"}"#)
         XCTAssertEqual(id, 42)
     }
 
@@ -593,8 +748,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let info = try await registry.getSchema(subject: "orders-value", version: 1)
@@ -617,8 +772,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         _ = try await registry.getSchema(subject: "orders-value", version: 1)
@@ -638,8 +793,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let info = try await registry.getLatestSchema(subject: "events-value")
@@ -653,8 +808,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             jsonResponse(200, json: ["events-value", "orders-value", "users-key"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let subjects = try await registry.listSubjects()
@@ -666,8 +821,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             jsonResponse(200, json: [1, 2, 3])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let versions = try await registry.listVersions(subject: "events-value")
@@ -679,8 +834,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             jsonResponse(200, json: ["is_compatible": true])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let compatible = try await registry.checkCompatibility(
@@ -696,8 +851,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             jsonResponse(200, json: ["is_compatible": false])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let compatible = try await registry.checkCompatibility(
@@ -712,8 +867,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             jsonResponse(200, json: ["compatibilityLevel": "BACKWARD"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         let level = try await registry.getCompatibilityLevel(subject: "events-value")
@@ -721,18 +876,22 @@ final class SchemaRegistryClientMockTests: XCTestCase {
     }
 
     func testSetCompatibilityLevel() async throws {
+        let recorder = URLRequestRecorder()
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "PUT")
-            let body = try! JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-            XCTAssertEqual(body["compatibility"] as? String, "FULL")
             return jsonResponse(200, json: ["compatibility": "FULL"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
-            session: makeMockSession()
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
+            session: makeMockSession(),
+            requestObserver: { recorder.record($0) }
         )
         try await registry.setCompatibilityLevel(subject: "events-value", level: .full)
+
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let body = try request.decodedJSONBody(as: [String: Any].self)
+        XCTAssertEqual(body["compatibility"] as? String, "FULL")
     }
 
     func testDeleteSubject() async throws {
@@ -747,8 +906,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         _ = try await registry.getSchema(subject: "events-value", version: 1)
@@ -777,15 +936,17 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         _ = try await registry.getSchema(subject: "s", version: 1)
-        XCTAssertEqual(await registry.cacheCount, 1)
+        let countAfterFetch = await registry.cacheCount
+        XCTAssertEqual(countAfterFetch, 1)
 
         await registry.clearCache()
-        XCTAssertEqual(await registry.cacheCount, 0)
+        let countAfterClear = await registry.cacheCount
+        XCTAssertEqual(countAfterClear, 0)
     }
 
     func testSchemaRegistryAuthHeader() async throws {
@@ -795,21 +956,21 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             return jsonResponse(200, json: ["events-value"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             authToken: "registry-token",
             session: makeMockSession()
         )
         _ = try await registry.listSubjects()
     }
 
-    func testSchemaRegistry401ThrowsAuthError() async {
+    func testSchemaRegistry401ThrowsAuthError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(401, json: ["error": "Unauthorized"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         do {
@@ -821,48 +982,54 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected authenticationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testSchemaRegistry404ThrowsSchemaError() async {
+    func testSchemaRegistry404ThrowsSchemaError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(404, json: ["error": "not found"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         do {
             _ = try await registry.getSchema(subject: "missing", version: 1)
             XCTFail("Expected schema error")
         } catch let error as StreamlineError {
-            if case .schemaRegistryError(let msg) = error {
+            if case let .schemaRegistryError(msg) = error {
                 XCTAssertTrue(msg.contains("not found"))
             } else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testSchemaRegistry409ThrowsIncompatibleError() async {
+    func testSchemaRegistry409ThrowsIncompatibleError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(409, json: ["error": "schema incompatible"])
         }
 
-        let registry = SchemaRegistryClient(
-            baseURL: URL(string: "http://localhost:9094")!,
+        let registry = try SchemaRegistryClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:9094")),
             session: makeMockSession()
         )
         do {
             _ = try await registry.registerSchema(subject: "events-value", schema: "{}", format: .json)
             XCTFail("Expected schema error")
         } catch let error as StreamlineError {
-            if case .schemaRegistryError(let msg) = error {
+            if case let .schemaRegistryError(msg) = error {
                 XCTAssertTrue(msg.contains("Incompatible"))
             } else {
                 XCTFail("Expected schemaRegistryError, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -870,7 +1037,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testClusterInfoReturnsClusterDetails() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.hasSuffix("/v1/cluster"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.hasSuffix("/v1/cluster"))
             return jsonResponse(200, json: [
                 "cluster_id": "cluster-abc",
                 "broker_id": 1,
@@ -882,7 +1049,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let info = try await admin.clusterInfo()
 
         XCTAssertEqual(info.clusterId, "cluster-abc")
@@ -903,18 +1070,18 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let brokers = try await admin.listBrokers()
         XCTAssertEqual(brokers.count, 1)
         XCTAssertEqual(brokers[0].host, "h1")
     }
 
-    func testClusterInfoUnauthorized() async {
+    func testClusterInfoUnauthorized() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(401, json: ["error": "unauthorized"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.clusterInfo()
             XCTFail("Expected auth error")
@@ -924,6 +1091,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected authenticationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -931,7 +1100,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testConsumerGroupLagReturnsLagDetails() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/consumer-groups/my-group/lag"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/consumer-groups/my-group/lag"))
             return jsonResponse(200, json: [
                 "group_id": "my-group",
                 "partitions": [
@@ -942,7 +1111,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let lag = try await admin.consumerGroupLag(groupId: "my-group")
 
         XCTAssertEqual(lag.groupId, "my-group")
@@ -954,7 +1123,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testConsumerGroupTopicLagReturnsScopedLag() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/lag/events"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/lag/events"))
             return jsonResponse(200, json: [
                 "group_id": "my-group",
                 "partitions": [
@@ -964,7 +1133,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let lag = try await admin.consumerGroupTopicLag(groupId: "my-group", topic: "events")
 
         XCTAssertEqual(lag.partitions.count, 1)
@@ -972,12 +1141,12 @@ final class SchemaRegistryClientMockTests: XCTestCase {
         XCTAssertEqual(lag.totalLag, 10)
     }
 
-    func testConsumerGroupLagNotFound() async {
+    func testConsumerGroupLagNotFound() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(404, json: ["error": "not found"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.consumerGroupLag(groupId: "nonexistent")
             XCTFail("Expected error")
@@ -987,6 +1156,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected topicNotFound, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -994,7 +1165,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testResetOffsetsDryRunReturnsProjectedChanges() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("reset-offsets/dry-run"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("reset-offsets/dry-run"))
             XCTAssertEqual(request.httpMethod, "POST")
             return jsonResponse(200, json: [
                 ["topic": "events", "partition": 0, "current_offset": 100, "end_offset": 100, "lag": 0],
@@ -1002,7 +1173,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let result = try await admin.resetOffsetsDryRun(groupId: "my-group", topic: "events", strategy: "earliest")
 
         XCTAssertEqual(result.count, 2)
@@ -1012,13 +1183,14 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testResetOffsetsSendsPostRequest() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("reset-offsets"))
-            XCTAssertFalse(request.url!.path.contains("dry-run"))
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.path.contains("reset-offsets"))
+            XCTAssertFalse(url.path.contains("dry-run"))
             XCTAssertEqual(request.httpMethod, "POST")
             return jsonResponse(200, json: [:] as [String: Any])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         try await admin.resetOffsets(groupId: "my-group", topic: "events", strategy: "latest")
     }
 
@@ -1026,8 +1198,9 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testInspectMessagesReturnsMessagesWithHeaders() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/v1/inspect/events"))
-            let query = request.url!.query ?? ""
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.path.contains("/v1/inspect/events"))
+            let query = url.query ?? ""
             XCTAssertTrue(query.contains("partition=0"))
             XCTAssertTrue(query.contains("limit=5"))
             return jsonResponse(200, json: [
@@ -1036,7 +1209,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let messages = try await admin.inspectMessages(topic: "events", partition: 0, limit: 5)
 
         XCTAssertEqual(messages.count, 2)
@@ -1048,20 +1221,21 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testInspectMessagesWithOffset() async throws {
         MockURLProtocol.requestHandler = { request in
-            let query = request.url!.query ?? ""
+            let query = try XCTUnwrap(request.url).query ?? ""
             XCTAssertTrue(query.contains("offset=100"))
             return jsonResponse(200, json: [] as [Any])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let messages = try await admin.inspectMessages(topic: "events", offset: 100)
         XCTAssertEqual(messages.count, 0)
     }
 
     func testLatestMessagesReturnsRecentMessages() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.hasSuffix("/latest"))
-            let query = request.url!.query ?? ""
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.path.hasSuffix("/latest"))
+            let query = url.query ?? ""
             XCTAssertTrue(query.contains("count=3"))
             return jsonResponse(200, json: [
                 ["offset": 97, "value": "msg1", "timestamp": 3000, "partition": 0, "headers": [:] as [String: String]],
@@ -1070,7 +1244,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let messages = try await admin.latestMessages(topic: "events", count: 3)
 
         XCTAssertEqual(messages.count, 3)
@@ -1078,12 +1252,12 @@ final class SchemaRegistryClientMockTests: XCTestCase {
         XCTAssertEqual(messages[2].value, "msg3")
     }
 
-    func testInspectMessagesServerError() async {
+    func testInspectMessagesServerError() async throws {
         MockURLProtocol.requestHandler = { _ in
             jsonResponse(500, json: ["error": "internal"])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         do {
             _ = try await admin.inspectMessages(topic: "events")
             XCTFail("Expected error")
@@ -1093,6 +1267,8 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             } else {
                 XCTFail("Expected adminOperationFailed, got \(error)")
             }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
@@ -1100,14 +1276,14 @@ final class SchemaRegistryClientMockTests: XCTestCase {
 
     func testMetricsHistoryReturnsMetricPoints() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertTrue(request.url!.path.contains("/v1/metrics/history"))
+            XCTAssertTrue(try XCTUnwrap(request.url).path.contains("/v1/metrics/history"))
             return jsonResponse(200, json: [
                 ["name": "bytes_in", "value": 1024.5, "labels": ["topic": "events"], "timestamp": 1000],
                 ["name": "bytes_out", "value": 512.0, "labels": [:] as [String: String], "timestamp": 1001],
             ])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let metrics = try await admin.metricsHistory()
 
         XCTAssertEqual(metrics.count, 2)
@@ -1122,7 +1298,7 @@ final class SchemaRegistryClientMockTests: XCTestCase {
             jsonResponse(200, json: [] as [Any])
         }
 
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, session: makeMockSession())
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), session: makeMockSession())
         let metrics = try await admin.metricsHistory()
         XCTAssertEqual(metrics.count, 0)
     }

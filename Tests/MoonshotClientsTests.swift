@@ -1,37 +1,24 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 // MARK: - URL protocol stub (local copy to avoid coupling to other test files)
 
 final class MoonshotURLProtocol: URLProtocol {
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-    static var capturedRequests: [URLRequest] = []
-    static var capturedBodies: [Data] = []
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
-        Self.capturedRequests.append(request)
-        if let stream = request.httpBodyStream {
-            stream.open()
-            var data = Data()
-            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 1024)
-            defer { buf.deallocate() }
-            while stream.hasBytesAvailable {
-                let n = stream.read(buf, maxLength: 1024)
-                if n <= 0 { break }
-                data.append(buf, count: n)
-            }
-            stream.close()
-            Self.capturedBodies.append(data)
-        } else if let body = request.httpBody {
-            Self.capturedBodies.append(body)
-        }
         guard let handler = Self.requestHandler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
@@ -50,8 +37,6 @@ final class MoonshotURLProtocol: URLProtocol {
 
     static func reset() {
         requestHandler = nil
-        capturedRequests = []
-        capturedBodies = []
     }
 }
 
@@ -62,22 +47,33 @@ private func mockSession() -> URLSession {
 }
 
 private func jsonResponse(_ status: Int, json: Any) -> (HTTPURLResponse, Data) {
-    let url = URL(string: "http://localhost:9094")!
-    let resp = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
-                               headerFields: ["Content-Type": "application/json"])!
-    let data = try! JSONSerialization.data(withJSONObject: json)
+    let url = requiredTestValue(URL(string: "http://localhost:9094"))
+    let resp = requiredTestValue(
+        HTTPURLResponse(
+            url: url,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )
+    )
+    let data = testJSONData(json)
     return (resp, data)
 }
 
 private func opts(token: String? = nil) -> MoonshotOptions {
-    MoonshotOptions(httpURL: URL(string: "http://localhost:9094")!,
-                    authToken: token, session: mockSession())
+    MoonshotOptions(
+        httpURL: requiredTestValue(URL(string: "http://localhost:9094")),
+        authToken: token,
+        session: mockSession()
+    )
 }
 
 // MARK: - Tests
 
 final class MoonshotBranchAdminTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testListAndCreate() async throws {
         var nthRequest = 0
@@ -85,14 +81,15 @@ final class MoonshotBranchAdminTests: XCTestCase {
             nthRequest += 1
             if nthRequest == 1 {
                 XCTAssertEqual(req.httpMethod, "GET")
-                XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/branches"))
+                XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/branches"))
                 return jsonResponse(200, json: [
                     "branches": [
                         ["name": "main", "parent": NSNull(), "created_at_ms": 1],
                         ["name": "f", "parent": "main", "created_at_ms": 2],
-                    ]
+                    ],
                 ])
             }
+
             XCTAssertEqual(req.httpMethod, "POST")
             return jsonResponse(201, json: ["name": "newb", "parent": "main", "created_at_ms": 99])
         }
@@ -110,8 +107,12 @@ final class MoonshotBranchAdminTests: XCTestCase {
         MoonshotURLProtocol.requestHandler = { req in
             XCTAssertEqual(req.httpMethod, "DELETE")
             // "feature/a" should encode "/" as %2F
-            XCTAssertTrue(req.url!.absoluteString.contains("feature%2Fa"))
-            let resp = HTTPURLResponse(url: req.url!, statusCode: 204, httpVersion: "HTTP/1.1", headerFields: nil)!
+            let url = try XCTUnwrap(req.url)
+            XCTAssertTrue(url.absoluteString.contains("feature%2Fa"))
+            XCTAssertFalse(url.absoluteString.contains("%252F"))
+            let resp = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 204, httpVersion: "HTTP/1.1", headerFields: nil)
+            )
             return (resp, Data())
         }
         let admin = BranchAdminClient(opts())
@@ -139,7 +140,9 @@ final class MoonshotBranchAdminTests: XCTestCase {
 }
 
 final class MoonshotContractsTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testValidValidation() async throws {
         MoonshotURLProtocol.requestHandler = { _ in
@@ -163,8 +166,14 @@ final class MoonshotContractsTests: XCTestCase {
 
     func testServerErrorThrows() async {
         MoonshotURLProtocol.requestHandler = { req in
-            let resp = HTTPURLResponse(url: req.url!, statusCode: 500, httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "text/plain"])!
+            let resp = try XCTUnwrap(
+                try HTTPURLResponse(
+                    url: XCTUnwrap(req.url),
+                    statusCode: 500,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "text/plain"]
+                )
+            )
             return (resp, Data("nope".utf8))
         }
         let c = ContractsClient(opts())
@@ -180,7 +189,7 @@ final class MoonshotContractsTests: XCTestCase {
 
     func testRegisterAndGet() async throws {
         var n = 0
-        MoonshotURLProtocol.requestHandler = { req in
+        MoonshotURLProtocol.requestHandler = { _ in
             n += 1
             if n == 1 {
                 return jsonResponse(200, json: ["name": "orders", "version": 1])
@@ -196,19 +205,21 @@ final class MoonshotContractsTests: XCTestCase {
 }
 
 final class MoonshotAttestationTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testSignAndVerify() async throws {
         var n = 0
         MoonshotURLProtocol.requestHandler = { req in
             n += 1
             if n == 1 {
-                XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/attest/sign"))
+                XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/attest/sign"))
                 return jsonResponse(200, json: [
-                    "key_id": "k", "algorithm": "ed25519", "signature": "sig", "payload_hash": "h"
+                    "key_id": "k", "algorithm": "ed25519", "signature": "sig", "payload_hash": "h",
                 ])
             }
-            XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/attest/verify"))
+            XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/attest/verify"))
             return jsonResponse(200, json: ["valid": true])
         }
         let a = AttestationClient(opts(), defaultKeyId: "k")
@@ -222,12 +233,14 @@ final class MoonshotAttestationTests: XCTestCase {
 }
 
 final class MoonshotSearchTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testSearchOK() async throws {
         MoonshotURLProtocol.requestHandler = { _ in
             jsonResponse(200, json: [
-                "hits": [["topic": "t", "partition": 1, "offset": 42, "score": 0.91, "snippet": "s"]]
+                "hits": [["topic": "t", "partition": 1, "offset": 42, "score": 0.91, "snippet": "s"]],
             ])
         }
         let s = SemanticSearchClient(opts())
@@ -247,21 +260,23 @@ final class MoonshotSearchTests: XCTestCase {
 }
 
 final class MoonshotMemoryTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testRememberAndRecall() async throws {
         var n = 0
         MoonshotURLProtocol.requestHandler = { req in
             n += 1
             if n == 1 {
-                XCTAssertTrue(req.url!.path.hasSuffix("/api/v1/memory"))
+                XCTAssertTrue(try XCTUnwrap(req.url).path.hasSuffix("/api/v1/memory"))
                 return jsonResponse(200, json: ["ok": true])
             }
             return jsonResponse(200, json: [
                 "memories": [[
                     "agent": "a", "kind": "fact", "text": "x",
-                    "tags": ["t1"], "timestamp_ms": 1
-                ]]
+                    "tags": ["t1"], "timestamp_ms": 1,
+                ]],
             ])
         }
         let m = MemoryClient(opts())
@@ -283,7 +298,9 @@ final class MoonshotMemoryTests: XCTestCase {
 }
 
 final class MoonshotAuthHeaderTests: XCTestCase {
-    override func tearDown() { MoonshotURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        MoonshotURLProtocol.reset(); super.tearDown()
+    }
 
     func testAuthorizationHeaderForwarded() async throws {
         MoonshotURLProtocol.requestHandler = { req in

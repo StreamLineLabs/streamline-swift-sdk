@@ -27,7 +27,7 @@ struct CircuitBreakerUsage {
         let cb = CircuitBreaker(config: CircuitBreakerConfig(
             failureThreshold: 5,
             successThreshold: 2,
-            openTimeoutSeconds: 10.0,
+            openTimeout: 10.0,
             halfOpenMaxRequests: 3
         ))
 
@@ -36,10 +36,10 @@ struct CircuitBreakerUsage {
             circuitBreaker: cb
         )
         client.connect()
-        print("Connected. Circuit state: \(cb.state())")
+        print("Connection initiated. Circuit state: \(cb.state())")
 
         // Send messages through the circuit breaker
-        for i in 0..<20 {
+        for i in 0 ..< 20 {
             do {
                 try cb.check()
                 try client.produce(topic: "cb-example", stringValue: "message-\(i)")
@@ -56,7 +56,7 @@ struct CircuitBreakerUsage {
         // Show final state
         let counts = cb.counts()
         print("\nFinal circuit state: \(cb.state())")
-        print("Successes: \(counts.successes), Failures: \(counts.failures)")
+        print("Successes: \(counts.totalSuccesses), Failures: \(counts.totalFailures)")
 
         // Manual reset
         if cb.state() == .open {

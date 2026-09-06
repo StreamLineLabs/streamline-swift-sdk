@@ -4,21 +4,47 @@ import Foundation
 
 /// TLS configuration for secure connections.
 public struct TlsConfig: Sendable, Equatable {
-    /// Whether TLS is enabled.
+    /// Whether TLS is required. The WebSocket URL must use `wss://`.
     public let enabled: Bool
 
-    /// Path to the CA certificate bundle for server verification.
+    /// Retained for source compatibility. Custom CA bundles are unsupported.
     public let caCertificatePath: String?
 
-    /// Path to the client certificate for mutual TLS.
+    /// Retained for source compatibility. Mutual TLS is unsupported.
     public let clientCertificatePath: String?
 
-    /// Path to the client private key for mutual TLS.
+    /// Retained for source compatibility. Mutual TLS is unsupported.
     public let clientKeyPath: String?
 
-    /// Skip server certificate verification (for development only).
+    /// Retained for source compatibility. Disabling verification is unsupported.
     public let insecureSkipVerify: Bool
 
+    /// Configure TLS as disabled.
+    public init() {
+        enabled = false
+        caCertificatePath = nil
+        clientCertificatePath = nil
+        clientKeyPath = nil
+        insecureSkipVerify = false
+    }
+
+    /// Configure platform-default TLS. Set `enabled` to true and use a
+    /// `wss://` URL in ``StreamlineConfiguration``.
+    public init(enabled: Bool) {
+        self.enabled = enabled
+        caCertificatePath = nil
+        clientCertificatePath = nil
+        clientKeyPath = nil
+        insecureSkipVerify = false
+    }
+
+    /// Retained for source compatibility. Validation rejects custom TLS
+    /// material because it is not applied by the current URLSession transport.
+    @available(
+        *,
+        deprecated,
+        message: "Custom CA, mTLS, and insecure TLS options are unsupported; use TlsConfig(enabled:) with wss://."
+    )
     public init(
         enabled: Bool = false,
         caCertificatePath: String? = nil,
@@ -43,7 +69,8 @@ public enum SaslMechanism: String, Sendable, Equatable {
     case scramSha512 = "SCRAM-SHA-512"
 }
 
-/// SASL authentication configuration.
+/// Retained for source compatibility. The current WebSocket transport does not
+/// implement SASL and configuration validation rejects non-nil values.
 public struct SaslConfig: Sendable, Equatable {
     /// Authentication mechanism.
     public let mechanism: SaslMechanism
@@ -84,7 +111,7 @@ public final class TelemetrySpan: @unchecked Sendable {
         self.name = name
         self.topic = topic
         self.operation = operation
-        self.startTime = Date()
+        startTime = Date()
     }
 
     /// Duration since span start, in seconds.
@@ -132,7 +159,7 @@ public protocol Telemetry: Sendable {
 
 public extension Telemetry {
     /// Start a span with a custom name and attributes dictionary.
-    func startSpan(_ name: String, attributes: [String: String]) -> TelemetrySpan {
+    func startSpan(_: String, attributes: [String: String]) -> TelemetrySpan {
         let topic = attributes[TelemetryAttributes.messagingDestinationName] ?? ""
         let operation = attributes[TelemetryAttributes.messagingOperation] ?? ""
         let span = startSpan(topic: topic, operation: operation)
@@ -156,8 +183,8 @@ public final class NoOpTelemetry: Telemetry, @unchecked Sendable {
         TelemetrySpan(name: "\(topic) \(operation)", topic: topic, operation: operation)
     }
 
-    public func endSpan(_ span: TelemetrySpan) {}
-    public func endSpan(_ span: TelemetrySpan, error: String) {}
+    public func endSpan(_: TelemetrySpan) {}
+    public func endSpan(_: TelemetrySpan, error _: String) {}
 }
 
 /// Console-based telemetry that prints timing information to stdout.
@@ -203,8 +230,8 @@ public enum TraceContext {
     }
 
     private static func generateHexId(length: Int) -> String {
-        (0..<length).map { _ in
-            String(format: "%x", Int.random(in: 0..<16))
+        (0 ..< length).map { _ in
+            String(format: "%x", Int.random(in: 0 ..< 16))
         }.joined()
     }
 }

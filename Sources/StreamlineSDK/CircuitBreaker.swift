@@ -84,7 +84,6 @@ public struct CircuitBreakerCounts: Sendable, Equatable {
 /// }
 /// ```
 public final class CircuitBreaker: @unchecked Sendable {
-
     // MARK: - Properties
 
     public let config: CircuitBreakerConfig
@@ -96,7 +95,7 @@ public final class CircuitBreaker: @unchecked Sendable {
     private var totalSuccessCount: Int = 0
     private var totalFailureCount: Int = 0
     private var requestCount: Int = 0
-    private var lastStateChangeDate: Date = Date()
+    private var lastStateChangeDate: Date = .init()
 
     // MARK: - Init
 
@@ -146,7 +145,7 @@ public final class CircuitBreaker: @unchecked Sendable {
         consecutiveFailureCount = 0
         totalSuccessCount += 1
 
-        if currentState == .halfOpen && consecutiveSuccessCount >= config.successThreshold {
+        if currentState == .halfOpen, consecutiveSuccessCount >= config.successThreshold {
             transitionTo(.closed)
         }
     }
@@ -181,7 +180,8 @@ public final class CircuitBreaker: @unchecked Sendable {
 
         // Check for automatic open → halfOpen transition.
         if currentState == .open,
-           Date().timeIntervalSince(lastStateChangeDate) >= config.openTimeout {
+           Date().timeIntervalSince(lastStateChangeDate) >= config.openTimeout
+        {
             transitionTo(.halfOpen)
         }
         return currentState

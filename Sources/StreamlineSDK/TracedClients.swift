@@ -21,7 +21,9 @@ public enum TelemetryAttributes {
             messagingDestinationName: topic,
             messagingOperation: "produce",
         ]
-        if let key = key { attrs[messagingMessageKey] = key }
+        if let key {
+            attrs[messagingMessageKey] = key
+        }
         return attrs
     }
 
@@ -32,7 +34,9 @@ public enum TelemetryAttributes {
             messagingDestinationName: topic,
             messagingOperation: "consume",
         ]
-        if let groupId = groupId { attrs[messagingConsumerGroupName] = groupId }
+        if let groupId {
+            attrs[messagingConsumerGroupName] = groupId
+        }
         return attrs
     }
 
@@ -43,8 +47,12 @@ public enum TelemetryAttributes {
             messagingDestinationName: topic,
             messagingOperation: "process",
         ]
-        if let offset = offset { attrs[messagingMessageOffset] = String(offset) }
-        if let partition = partition { attrs[messagingDestinationPartitionId] = String(partition) }
+        if let offset {
+            attrs[messagingMessageOffset] = String(offset)
+        }
+        if let partition {
+            attrs[messagingDestinationPartitionId] = String(partition)
+        }
         return attrs
     }
 }
@@ -53,8 +61,9 @@ public enum TelemetryAttributes {
 
 /// Wraps a ``StreamlineClient`` with automatic telemetry instrumentation.
 ///
-/// Every produce, subscribe, poll, and transaction operation creates a span
-/// following OpenTelemetry messaging semantic conventions.
+/// Produce, subscribe, and poll operations create spans following OpenTelemetry
+/// messaging semantic conventions. Deprecated transaction calls emit an error
+/// span and fail closed.
 ///
 /// ```swift
 /// let telemetry = ConsoleTelemetry()
@@ -63,15 +72,18 @@ public enum TelemetryAttributes {
 /// try traced.produce(topic: "events", stringValue: "hello")
 /// ```
 public final class TracedClient: @unchecked Sendable {
-
     private let client: StreamlineClient
     private let telemetry: Telemetry
 
     /// The underlying client's connection state.
-    public var state: ConnectionState { client.state }
+    public var state: ConnectionState {
+        client.state
+    }
 
     /// The underlying client's metrics snapshot.
-    public var clientMetrics: ClientMetrics { client.clientMetrics }
+    public var clientMetrics: ClientMetrics {
+        client.clientMetrics
+    }
 
     public init(client: StreamlineClient, telemetry: Telemetry) {
         self.client = client
@@ -82,7 +94,7 @@ public final class TracedClient: @unchecked Sendable {
     public func connect() {
         let span = telemetry.startSpan(topic: "", operation: "connect")
         client.connect()
-        span.setAttribute("status", value: "connected")
+        span.setAttribute("status", value: String(describing: client.state))
         telemetry.endSpan(span)
     }
 
@@ -96,7 +108,9 @@ public final class TracedClient: @unchecked Sendable {
     /// Produce a message with tracing.
     public func produce(topic: String, key: String? = nil, value: Data) throws {
         let span = telemetry.startSpan(topic: topic, operation: "produce")
-        if let key = key { span.setAttribute(TelemetryAttributes.messagingMessageKey, value: key) }
+        if let key {
+            span.setAttribute(TelemetryAttributes.messagingMessageKey, value: key)
+        }
         do {
             try client.produce(topic: topic, key: key, value: value)
             telemetry.endSpan(span)
@@ -165,43 +179,34 @@ public final class TracedClient: @unchecked Sendable {
         }
     }
 
-    /// Begin a transaction with tracing.
+    /// Transactions are unsupported by the current WebSocket wire protocol.
+    @available(*, deprecated, message: "Transactions are unsupported and always throw.")
     public func beginTransaction() throws {
         let span = telemetry.startSpan(topic: "", operation: "transaction.begin")
-        do {
-            try client.beginTransaction()
-            telemetry.endSpan(span)
-        } catch {
-            span.setError(error)
-            telemetry.endSpan(span, error: error.localizedDescription)
-            throw error
-        }
+        let error = StreamlineClient.unsupportedTransactionError()
+        span.setError(error)
+        telemetry.endSpan(span, error: error.localizedDescription)
+        throw error
     }
 
-    /// Commit a transaction with tracing.
+    /// Transactions are unsupported by the current WebSocket wire protocol.
+    @available(*, deprecated, message: "Transactions are unsupported and always throw.")
     public func commitTransaction() throws {
         let span = telemetry.startSpan(topic: "", operation: "transaction.commit")
-        do {
-            try client.commitTransaction()
-            telemetry.endSpan(span)
-        } catch {
-            span.setError(error)
-            telemetry.endSpan(span, error: error.localizedDescription)
-            throw error
-        }
+        let error = StreamlineClient.unsupportedTransactionError()
+        span.setError(error)
+        telemetry.endSpan(span, error: error.localizedDescription)
+        throw error
     }
 
-    /// Abort a transaction with tracing.
+    /// Transactions are unsupported by the current WebSocket wire protocol.
+    @available(*, deprecated, message: "Transactions are unsupported and always throw.")
     public func abortTransaction() throws {
         let span = telemetry.startSpan(topic: "", operation: "transaction.abort")
-        do {
-            try client.abortTransaction()
-            telemetry.endSpan(span)
-        } catch {
-            span.setError(error)
-            telemetry.endSpan(span, error: error.localizedDescription)
-            throw error
-        }
+        let error = StreamlineClient.unsupportedTransactionError()
+        span.setError(error)
+        telemetry.endSpan(span, error: error.localizedDescription)
+        throw error
     }
 
     /// Flush pending batches with tracing.
@@ -221,7 +226,6 @@ public final class TracedClient: @unchecked Sendable {
 /// let topics = try await traced.listTopics()
 /// ```
 public final class TracedAdminClient: @unchecked Sendable {
-
     private let admin: AdminClient
     private let telemetry: Telemetry
 

@@ -1,12 +1,11 @@
-import XCTest
 @testable import StreamlineSDK
+import XCTest
 
 final class StreamlineClientTests: XCTestCase {
-
     // MARK: - Configuration
 
-    func testDefaultConfiguration() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testDefaultConfiguration() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         XCTAssertTrue(config.autoReconnect)
         XCTAssertEqual(config.maxRetries, 10)
         XCTAssertEqual(config.timeout, 30)
@@ -15,9 +14,9 @@ final class StreamlineClientTests: XCTestCase {
         XCTAssertEqual(config.maxBackoff, 30)
     }
 
-    func testCustomConfiguration() {
-        let config = StreamlineConfiguration(
-            url: URL(string: "ws://myhost:9092")!,
+    func testCustomConfiguration() throws {
+        let config = try StreamlineConfiguration(
+            url: XCTUnwrap(URL(string: "ws://myhost:9092")),
             autoReconnect: false,
             maxRetries: 5,
             timeout: 10,
@@ -36,8 +35,8 @@ final class StreamlineClientTests: XCTestCase {
 
     // MARK: - Connection State
 
-    func testInitialStateIsDisconnected() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testInitialStateIsDisconnected() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         XCTAssertEqual(client.state, .disconnected)
     }
@@ -52,7 +51,7 @@ final class StreamlineClientTests: XCTestCase {
     // MARK: - Offline Queue
 
     func testOfflineQueueBuffersMessages() throws {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         try client.produce(topic: "test-topic", stringValue: "hello")
     }
@@ -243,7 +242,7 @@ final class StreamlineClientTests: XCTestCase {
 
     func testAdminOperationError() {
         let error = StreamlineError.adminOperationFailed("HTTP 500: internal error")
-        if case .adminOperationFailed(let message) = error {
+        if case let .adminOperationFailed(message) = error {
             XCTAssertTrue(message.contains("500"))
         } else {
             XCTFail("Expected adminOperationFailed")
@@ -252,7 +251,7 @@ final class StreamlineClientTests: XCTestCase {
 
     func testQueryError() {
         let error = StreamlineError.queryFailed("invalid SQL syntax")
-        if case .queryFailed(let message) = error {
+        if case let .queryFailed(message) = error {
             XCTAssertTrue(message.contains("SQL"))
         } else {
             XCTFail("Expected queryFailed")
@@ -261,20 +260,20 @@ final class StreamlineClientTests: XCTestCase {
 
     // MARK: - AdminClient Init
 
-    func testAdminClientInit() {
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!)
+    func testAdminClientInit() throws {
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")))
         XCTAssertNotNil(admin)
     }
 
-    func testAdminClientWithAuth() {
-        let admin = AdminClient(baseURL: URL(string: "http://localhost:9094")!, authToken: "my-token")
+    func testAdminClientWithAuth() throws {
+        let admin = try AdminClient(baseURL: XCTUnwrap(URL(string: "http://localhost:9094")), authToken: "my-token")
         XCTAssertNotNil(admin)
     }
 
     // MARK: - AsyncStream
 
-    func testMessagesReturnsAsyncStream() {
-        let config = StreamlineConfiguration(url: URL(string: "ws://localhost:9092")!)
+    func testMessagesReturnsAsyncStream() throws {
+        let config = try StreamlineConfiguration(url: XCTUnwrap(URL(string: "ws://localhost:9092")))
         let client = StreamlineClient(configuration: config)
         let stream = client.messages(topic: "test")
         XCTAssertNotNil(stream)

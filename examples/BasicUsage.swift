@@ -29,15 +29,15 @@ struct BasicUsage {
 
         // List topics
         let topics = try await admin.listTopics()
-        print("Topics: \(topics.map { $0.name })")
+        print("Topics: \(topics.map(\.name))")
 
         // -- Streaming Client (WebSocket) --
         let client = StreamlineClient(configuration: config)
         client.connect()
-        print("✓ Connected to Streamline")
+        print("✓ Connection initiated; queued messages flush after WebSocket readiness")
 
         // Produce messages
-        for i in 1...5 {
+        for i in 1 ... 5 {
             try client.produce(
                 topic: "swift-demo",
                 key: "user-\(i)",
@@ -53,7 +53,9 @@ struct BasicUsage {
             let value = String(data: message.value, encoding: .utf8) ?? ""
             print("  topic=\(message.topic) key=\(message.key ?? "nil") value=\(value)")
             count += 1
-            if count >= 5 { break }
+            if count >= 5 {
+                break
+            }
         }
 
         // -- SQL Query --
@@ -62,7 +64,7 @@ struct BasicUsage {
 
         // -- Consumer Groups --
         let groups = try await admin.listConsumerGroups()
-        print("Consumer groups: \(groups.map { $0.id })")
+        print("Consumer groups: \(groups.map(\.id))")
 
         // -- Server Info --
         let info = try await admin.serverInfo()

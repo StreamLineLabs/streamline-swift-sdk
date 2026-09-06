@@ -19,17 +19,49 @@ public struct StreamlineMessage: Sendable, Equatable {
     /// Server-assigned timestamp (nil for outbound messages).
     public let timestamp: Date?
 
-    public init(topic: String, key: String? = nil, value: Data, offset: Int64? = nil, timestamp: Date? = nil) {
+    /// Server-assigned partition (nil for outbound messages).
+    public let partition: Int?
+
+    /// Message headers returned by the server.
+    public let headers: [String: String]
+
+    public init(
+        topic: String,
+        key: String? = nil,
+        value: Data,
+        offset: Int64? = nil,
+        timestamp: Date? = nil,
+        partition: Int? = nil,
+        headers: [String: String] = [:]
+    ) {
         self.topic = topic
         self.key = key
         self.value = value
         self.offset = offset
         self.timestamp = timestamp
+        self.partition = partition
+        self.headers = headers
     }
 
     /// Convenience initializer that encodes a UTF-8 string as the value.
-    public init(topic: String, key: String? = nil, stringValue: String, offset: Int64? = nil, timestamp: Date? = nil) {
-        self.init(topic: topic, key: key, value: Data(stringValue.utf8), offset: offset, timestamp: timestamp)
+    public init(
+        topic: String,
+        key: String? = nil,
+        stringValue: String,
+        offset: Int64? = nil,
+        timestamp: Date? = nil,
+        partition: Int? = nil,
+        headers: [String: String] = [:]
+    ) {
+        self.init(
+            topic: topic,
+            key: key,
+            value: Data(stringValue.utf8),
+            offset: offset,
+            timestamp: timestamp,
+            partition: partition,
+            headers: headers
+        )
     }
 }
 
@@ -329,6 +361,7 @@ public enum ErrorCode: String, Sendable, Equatable, CaseIterable {
     case memoryAccessDenied
     case branchQuotaExceeded
     case semanticSearchUnavailable
+    case unsupported
 }
 
 // MARK: - Errors
@@ -401,45 +434,50 @@ public enum StreamlineError: Error, Sendable, Equatable {
     /// Semantic search is unavailable (embedding provider down).
     case semanticSearchUnavailable(String)
 
+    /// The requested operation has no verified protocol contract in this SDK.
+    case unsupported(String)
+
     // MARK: - Computed Properties
 
     /// Programmatic error classification.
     public var errorCode: ErrorCode {
         switch self {
         case .notConnected, .connectionFailed:
-            return .connection
+            .connection
         case .timeout:
-            return .timeout
+            .timeout
         case .authenticationFailed:
-            return .authentication
+            .authentication
         case .authorizationFailed:
-            return .authorization
+            .authorization
         case .topicNotFound:
-            return .topicNotFound
+            .topicNotFound
         case .partitionNotFound:
-            return .partitionNotFound
+            .partitionNotFound
         case .protocolError:
-            return .protocol
+            .protocol
         case .serializationError:
-            return .serialization
+            .serialization
         case .schemaRegistryError:
-            return .schema
+            .schema
         case .configurationError:
-            return .configuration
+            .configuration
         case .offlineQueueFull, .adminOperationFailed, .queryFailed, .internalError, .transaction:
-            return .internal
+            .internal
         case .circuitOpen:
-            return .circuitOpen
+            .circuitOpen
         case .contractViolation:
-            return .contractViolation
+            .contractViolation
         case .attestationFailed:
-            return .attestationFailed
+            .attestationFailed
         case .memoryAccessDenied:
-            return .memoryAccessDenied
+            .memoryAccessDenied
         case .branchQuotaExceeded:
-            return .branchQuotaExceeded
+            .branchQuotaExceeded
         case .semanticSearchUnavailable:
-            return .semanticSearchUnavailable
+            .semanticSearchUnavailable
+        case .unsupported:
+            .unsupported
         }
     }
 
@@ -447,9 +485,9 @@ public enum StreamlineError: Error, Sendable, Equatable {
     public var isRetryable: Bool {
         switch errorCode {
         case .connection, .timeout, .circuitOpen, .semanticSearchUnavailable:
-            return true
+            true
         default:
-            return false
+            false
         }
     }
 
@@ -457,49 +495,51 @@ public enum StreamlineError: Error, Sendable, Equatable {
     public var hint: String {
         switch self {
         case .notConnected:
-            return "Call connect() before producing or subscribing."
-        case .connectionFailed(let reason):
-            return "Connection failed (\(reason)). Verify the server URL and network connectivity."
+            "Call connect() before producing or subscribing."
+        case let .connectionFailed(reason):
+            "Connection failed (\(reason)). Verify the server URL and network connectivity."
         case .authenticationFailed:
-            return "Check your authToken, or SASL username/password credentials."
+            "Check your authToken and confirm the server accepts bearer authentication."
         case .authorizationFailed:
-            return "The authenticated identity lacks permission for this operation. Check ACLs."
+            "The authenticated identity lacks permission for this operation. Check ACLs."
         case .timeout:
-            return "The operation timed out. Consider increasing the timeout or checking server load."
-        case .topicNotFound(let name):
-            return "Topic '\(name)' does not exist. Create it first or enable auto-create on the server."
-        case .partitionNotFound(let detail):
-            return "Partition not found (\(detail)). Verify the partition index is within the topic's range."
+            "The operation timed out. Consider increasing the timeout or checking server load."
+        case let .topicNotFound(name):
+            "Topic '\(name)' does not exist. Create it first or enable auto-create on the server."
+        case let .partitionNotFound(detail):
+            "Partition not found (\(detail)). Verify the partition index is within the topic's range."
         case .serializationError:
-            return "Message payload could not be serialized/deserialized. Check the data format."
+            "Message payload could not be serialized/deserialized. Check the data format."
         case .protocolError:
-            return "Wire-protocol error. Ensure the client and server versions are compatible."
-        case .configurationError(let detail):
-            return "Invalid configuration (\(detail)). Review StreamlineConfiguration values."
+            "Wire-protocol error. Ensure the client and server versions are compatible."
+        case let .configurationError(detail):
+            "Invalid configuration (\(detail)). Review StreamlineConfiguration values."
         case .offlineQueueFull:
-            return "The offline queue is full (1000 messages). Connect to the server or reduce produce rate."
-        case .adminOperationFailed(let reason):
-            return "Admin operation failed (\(reason)). Check server logs for details."
-        case .queryFailed(let reason):
-            return "SQL query failed (\(reason)). Verify your query syntax."
-        case .schemaRegistryError(let reason):
-            return "Schema registry error (\(reason)). Check subject names and schema compatibility."
+            "The offline queue is full (1000 messages). Connect to the server or reduce produce rate."
+        case let .adminOperationFailed(reason):
+            "Admin operation failed (\(reason)). Check server logs for details."
+        case let .queryFailed(reason):
+            "SQL query failed (\(reason)). Verify your query syntax."
+        case let .schemaRegistryError(reason):
+            "Schema registry error (\(reason)). Check subject names and schema compatibility."
         case .circuitOpen:
-            return "Circuit breaker is open due to repeated failures. Wait for the open timeout to elapse."
-        case .internalError(let reason):
-            return "Internal error (\(reason)). This may indicate a bug — please report it."
-        case .transaction(let reason):
-            return "Transaction error (\(reason)). Ensure transactions are properly begun before commit/abort."
-        case .contractViolation(let topic, _):
-            return "Record violated the data contract for topic '\(topic)'. Validate the record against the registered schema."
+            "Circuit breaker is open due to repeated failures. Wait for the open timeout to elapse."
+        case let .internalError(reason):
+            "Internal error (\(reason)). This may indicate a bug — please report it."
+        case let .transaction(reason):
+            "Transaction error (\(reason)). Transactions are unsupported by the current WebSocket transport."
+        case let .contractViolation(topic, _):
+            "Record violated the data contract for topic '\(topic)'. Validate the record against the registered schema."
         case .attestationFailed:
-            return "Attestation signature verification failed. Check the signing key and attestation configuration."
-        case .memoryAccessDenied(let agent):
-            return "Agent '\(agent)' lacks permission. Verify agent permissions for memory operations."
-        case .branchQuotaExceeded(let branch, _):
-            return "Branch '\(branch)' exceeded its quota. Increase branch quotas or clean up unused branches."
+            "Attestation signature verification failed. Check the signing key and attestation configuration."
+        case let .memoryAccessDenied(agent):
+            "Agent '\(agent)' lacks permission. Verify agent permissions for memory operations."
+        case let .branchQuotaExceeded(branch, _):
+            "Branch '\(branch)' exceeded its quota. Increase branch quotas or clean up unused branches."
         case .semanticSearchUnavailable:
-            return "Semantic search is unavailable. Check embedding provider connectivity and configuration."
+            "Semantic search is unavailable. Check embedding provider connectivity and configuration."
+        case let .unsupported(reason):
+            "Unsupported operation (\(reason)). This SDK refused to claim success without a verified protocol contract."
         }
     }
 }
@@ -507,7 +547,7 @@ public enum StreamlineError: Error, Sendable, Equatable {
 /// Utilities for validating records before serialization.
 enum RecordValidation {
     /// Maximum allowed record size in bytes.
-    static let maxRecordSize = 1_048_576  // 1 MB
+    static let maxRecordSize = 1_048_576 // 1 MB
 
     /// Validates that a record does not exceed the maximum size.
     static func validate(key: Data?, value: Data?) throws {

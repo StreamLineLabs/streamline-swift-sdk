@@ -8,7 +8,6 @@ import Foundation
 /// - Only alphanumeric characters, `.`, `_`, and `-` are allowed.
 /// - Must not be `"."` or `".."`.
 public enum TopicNameValidator {
-
     /// Maximum allowed length for a topic name.
     public static let maxLength = 249
 
@@ -23,7 +22,7 @@ public enum TopicNameValidator {
                 "Topic name exceeds max length of \(maxLength)"
             )
         }
-        guard topic != "." && topic != ".." else {
+        guard topic != ".", topic != ".." else {
             throw StreamlineError.configurationError(
                 "Topic name must not be '.' or '..'"
             )
@@ -43,8 +42,8 @@ private extension Character {
     /// Unlike `Character.isLetter`, this excludes Unicode letters such as accented characters.
     var isASCIILetterOrDigit: Bool {
         guard let ascii = asciiValue else { return false }
-        return (ascii >= 0x30 && ascii <= 0x39)  // 0-9
-            || (ascii >= 0x41 && ascii <= 0x5A)  // A-Z
-            || (ascii >= 0x61 && ascii <= 0x7A)  // a-z
+        return (ascii >= 0x30 && ascii <= 0x39) // 0-9
+            || (ascii >= 0x41 && ascii <= 0x5A) // A-Z
+            || (ascii >= 0x61 && ascii <= 0x7A) // a-z
     }
 }

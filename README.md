@@ -1,4 +1,4 @@
-> 🟢 **Beta SDK** — This SDK is feature-complete with tests and CI for iOS/macOS. For browser/WebAssembly use cases, also see the [WASM SDK](https://github.com/streamlinelabs/streamline-wasm-sdk). Contributions welcome!
+> 🟡 **Beta SDK** — Validate behavior against your Streamline server version before production use. The current WebSocket transport does not provide transactions, broker acknowledgments, idempotent production, payload compression, SASL, custom CA bundles, or mutual TLS.
 
 # Streamline Swift SDK
 
@@ -11,9 +11,9 @@ Swift client SDK for [Streamline](https://github.com/streamlinelabs/streamline) 
 
 ## Requirements
 
-- Swift 5.9+
+- Swift 5.9+ on Apple platforms; Swift 6.1+ on Linux
 - iOS 15+ / macOS 13+
-- Streamline server 0.2.0 or later
+- Streamline server 0.4.0
 
 ## Installation
 
@@ -23,7 +23,7 @@ Add the dependency to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/streamlinelabs/streamline-swift-sdk.git", from: "0.2.0"),
+    .package(url: "https://github.com/streamlinelabs/streamline-swift-sdk.git", from: "0.4.0"),
 ]
 ```
 
@@ -38,9 +38,11 @@ let config = StreamlineConfiguration(
 )
 
 let client = StreamlineClient(configuration: config)
+try config.validate()
 client.connect()
 
-// Produce a message
+// connect() is non-blocking. Messages produced while connecting are queued
+// and flushed after the WebSocket open handshake succeeds.
 try client.produce(topic: "events", key: "user-1", stringValue: "{\"action\":\"click\"}")
 
 // Subscribe to a topic
@@ -54,23 +56,9 @@ client.disconnect()
 
 ## Transactions
 
-```swift
-let client = StreamlineClient(configuration: config)
-try await client.connect()
-
-try await client.beginTransaction()
-do {
-    try await client.produce(topic: "orders", key: "k1", value: "v1")
-    try await client.produce(topic: "orders", key: "k2", value: "v2")
-    try await client.commitTransaction()
-} catch {
-    try await client.abortTransaction()
-    throw error
-}
-```
-
-> **Note:** Transactions use client-side buffering. Messages are collected and sent as a batch
-> on commit, providing all-or-nothing delivery at the client level.
+Transactions are not implemented by the current WebSocket wire protocol.
+The deprecated transaction methods remain source-compatible but always throw
+`StreamlineError.transaction` rather than simulating atomic delivery.
 
 ## Admin Client
 
@@ -175,36 +163,54 @@ Supports **AVRO**, **PROTOBUF**, and **JSON** schema formats.
 ```swift
 let config = StreamlineConfiguration(
     url: URL(string: "wss://streamline.example.com:9092")!,
-    tls: TlsConfig(enabled: true, caCertificatePath: "/etc/ssl/ca.pem")
+    tls: TlsConfig(enabled: true)
 )
+try config.validate()
 ```
 
-### SASL Authentication
+TLS uses `URLSession` and the platform trust store. Custom CA bundles, mutual
+TLS client certificates/keys, and `insecureSkipVerify` are rejected because
+the current transport does not apply them.
 
-```swift
-let config = StreamlineConfiguration(
-    url: URL(string: "ws://streamline.example.com:9092")!,
-    sasl: SaslConfig(mechanism: .scramSha256, username: "admin", password: "secret")
-)
-```
+### Authentication
+
+Use `authToken` for bearer-token authentication. SASL configuration types are
+retained for source compatibility but rejected by `validate()` and `connect()`.
 
 ## Producer & Consumer Configuration
 
 ```swift
 let config = StreamlineConfiguration(
     url: URL(string: "ws://localhost:9092")!,
-    producerConfig: ProducerConfig(batchSize: 32768, compression: .lz4, acks: .all),
+    producerConfig: ProducerConfig(
+        batchSize: 32768,
+        lingerMs: 5,
+        compression: .none,
+        acks: .none
+    ),
     consumerConfig: ConsumerConfig(groupId: "my-app", autoCommit: false, autoOffsetReset: .earliest)
 )
+try config.validate()
 ```
+
+`batchSize` and `lingerMs` only buffer individual WebSocket sends on the
+client. They do not create an atomic broker-side batch. Compression,
+idempotence, and `.one`/`.all` acknowledgment modes fail validation. A
+successful `.none` send means `URLSession` accepted the frame, not that a
+broker persisted it. Retries may therefore produce duplicates.
+
+Consumer `commitOffsets`, `position`, and `committed` currently throw
+`StreamlineError.unsupported`. The WebSocket protocol has no verified durable
+commit acknowledgement or authoritative offset-query response contract, and
+the SDK does not substitute local bookkeeping as broker state.
 
 ## Features
 
 - **WebSocket connection** to Streamline server
 - **Admin client** — topic CRUD, consumer groups, SQL queries via HTTP REST API
 - **Schema Registry** — register, retrieve, and validate schemas (Avro, Protobuf, JSON)
-- **Security** — TLS encryption and SASL authentication (PLAIN, SCRAM-SHA-256/512)
-- **Producer/Consumer config** — batching, compression, acknowledgments, consumer groups
+- **Security** — platform-default TLS via `wss://` and bearer tokens
+- **Producer buffering** — size/linger-based flushing of individual sends with retry backoff
 - **AsyncStream consumption** — idiomatic `for await` streaming with automatic lifecycle
 - **Telemetry** — pluggable tracing with W3C Trace Context propagation
 - **Auto-reconnect** with exponential backoff
@@ -221,9 +227,9 @@ let config = StreamlineConfiguration(
 | `maxRetries` | `10` | Maximum reconnection attempts |
 | `timeout` | `30` | Connection timeout in seconds |
 | `authToken` | `nil` | Optional bearer token for authentication |
-| `tls` | `nil` | TLS configuration (see [Security](#security)) |
-| `sasl` | `nil` | SASL authentication (see [Security](#security)) |
-| `producerConfig` | defaults | Producer tuning (see [Producer & Consumer Configuration](#producer--consumer-configuration)) |
+| `tls` | `nil` | Optional requirement for platform TLS with `wss://`; custom TLS material is rejected |
+| `sasl` | `nil` | Deprecated and unsupported; non-nil values are rejected |
+| `producerConfig` | defaults | Supported client-side buffering/retry settings |
 | `consumerConfig` | defaults | Consumer tuning (see [Producer & Consumer Configuration](#producer--consumer-configuration)) |
 | `initialBackoff` | `0.5` | Initial reconnection backoff (seconds) |
 | `maxBackoff` | `30` | Maximum backoff cap (seconds) |
@@ -268,17 +274,19 @@ do {
 
 ### Retry Strategy
 
-The Swift SDK automatically retries failed sends with exponential backoff when `ProducerConfig.retries > 0` (default: 3). Configure retry behavior:
+The Swift SDK retries failed WebSocket sends with exponential backoff when
+`ProducerConfig.retries > 0` (default: 3). Because broker acknowledgments and
+idempotence are unavailable, a retry can duplicate a record.
 
 ```swift
 let config = ProducerConfig(
     retries: 5,              // Max retry attempts
     retryBackoffMs: 200      // Base backoff (doubles each attempt)
 )
-let client = StreamlineClient(
-    configuration: StreamlineConfiguration(url: wsURL),
+let client = StreamlineClient(configuration: StreamlineConfiguration(
+    url: wsURL,
     producerConfig: config
-)
+))
 ```
 
 ## Circuit Breaker
@@ -294,14 +302,13 @@ let breaker = CircuitBreaker(config: CircuitBreakerConfig(
     openTimeout: 30.0         // 30s before probing
 ))
 
-if breaker.check() {
-    do {
-        try client.produce(topic: "events", key: "user-1", stringValue: "payload")
-        breaker.recordSuccess()
-    } catch {
-        breaker.recordFailure()
-        throw error
-    }
+do {
+    try breaker.check()
+    try client.produce(topic: "events", key: "user-1", stringValue: "payload")
+    breaker.recordSuccess()
+} catch {
+    breaker.recordFailure()
+    throw error
 }
 ```
 
@@ -317,7 +324,7 @@ The [`examples/`](examples/) directory contains runnable examples:
 | [QueryUsage.swift](examples/QueryUsage.swift) | SQL analytics with the embedded query engine |
 | [SchemaRegistryUsage.swift](examples/SchemaRegistryUsage.swift) | Schema registration and validation |
 | [CircuitBreakerUsage.swift](examples/CircuitBreakerUsage.swift) | Resilient production with circuit breaker |
-| [SecurityUsage.swift](examples/SecurityUsage.swift) | TLS and SASL authentication |
+| [SecurityUsage.swift](examples/SecurityUsage.swift) | Bearer authentication and platform TLS |
 
 ## Moonshot Features
 
@@ -328,7 +335,7 @@ The [`examples/`](examples/) directory contains runnable examples:
 Query topics by meaning instead of offset. Requires a topic created with `semantic.embed=true`.
 
 ```swift
-let results = try await client.search(topic: "logs.app", query: "payment failure", k: 10)
+let results = try await admin.search(topic: "logs.app", query: "payment failure", k: 10)
 for hit in results {
     print("[p\(hit.partition)] offset=\(hit.offset) score=\(String(format: "%.2f", hit.score))")
 }
@@ -341,19 +348,50 @@ Verify cryptographic provenance attestations attached to records by data contrac
 ```swift
 import StreamlineSDK
 
-let verifier = try StreamlineVerifier(publicKey: publicKeyData)
-let result = try verifier.verify(record: record)
+let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData)
+let verifier = StreamlineVerifier(publicKey: publicKey, trustedKeyId: "producer-key")
+let result = verifier.verify(message: message)
 print("Verified: \(result.verified), Producer: \(result.producerId)")
 ```
+
+Verification binds the signed SHA-256 digest, topic, partition, and offset to
+the consumed `StreamlineMessage`. Messages without partition/offset/header
+metadata fail closed.
+
+A `key_id` in the attestation envelope is only trusted when it matches a
+verification key registered up front — either the single `trustedKeyId`
+passed to `init(publicKey:trustedKeyId:)`, or an entry in a keyring for
+multi-producer setups:
+
+```swift
+let verifier = StreamlineVerifier(trustedKeys: [
+    "producer-a": producerAPublicKey,
+    "producer-b": producerBPublicKey,
+])
+```
+
+The envelope's self-asserted `key_id` is never used to select or fetch a key
+from an untrusted source; an unregistered `key_id` fails closed regardless of
+whether some other signature would otherwise be valid.
 
 ### Agent Memory (MCP)
 
 Use Streamline as persistent memory for AI agents via the MCP protocol.
 
 ```swift
-let memory = MemoryClient(baseURL: URL(string: "http://localhost:9094/mcp/v1")!)
-try await memory.remember("user prefers dark mode", tags: ["preferences"])
-let results = try await memory.recall("user preferences", k: 5)
+let options = MoonshotOptions(httpURL: URL(string: "http://localhost:9094")!)
+let memory = MemoryClient(options)
+try await memory.remember(
+    agent: "assistant",
+    kind: .fact,
+    text: "user prefers dark mode",
+    tags: ["preferences"]
+)
+let results = try await memory.recall(
+    agent: "assistant",
+    query: "user preferences",
+    k: 5
+)
 ```
 
 ### Branched Streams
@@ -361,8 +399,10 @@ let results = try await memory.recall("user preferences", k: 5)
 Create topic branches for replay, A/B testing, or counterfactual analysis.
 
 ```swift
-let branch = try await admin.createBranch(topic: "events", name: "experiment-v2")
-for await msg in client.messages(topic: branch.topic) {
+let options = MoonshotOptions(httpURL: URL(string: "http://localhost:9094")!)
+let branches = BranchAdminClient(options)
+let branch = try await branches.createBranch(name: "experiment-v2", parent: "events")
+for await msg in client.messages(topic: branch.name) {
     process(msg)
 }
 ```
@@ -370,6 +410,8 @@ for await msg in client.messages(topic: branch.topic) {
 ## Contributing
 
 Contributions are welcome! This is a community-maintained SDK. Please see the [organization contributing guide](https://github.com/streamlinelabs/.github/blob/main/CONTRIBUTING.md) for guidelines.
+
+For usage questions and compatibility help, see [SUPPORT.md](SUPPORT.md).
 
 ## License
 
