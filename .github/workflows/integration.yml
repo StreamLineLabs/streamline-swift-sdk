@@ -24,8 +24,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@v7
+      - uses: swift-actions/setup-swift@v3
         with:
           swift-version: '5.9'
       - name: Wait for Streamline
